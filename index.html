@@ -32,6 +32,7 @@
   p.hint{color:var(--muted);font-size:14px;margin:0 0 12px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
   label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;letter-spacing:.03em;text-transform:uppercase}
+  label.inline{display:flex;gap:8px;align-items:center;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0}
   input,select,textarea,button{font:inherit;color:inherit}
   input[type=text],input[type=url],input[type=email],input[type=password],select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:transparent}
   textarea{min-height:70px;resize:vertical}
@@ -47,8 +48,10 @@
   .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .tile{position:relative;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:var(--soft);border:0;padding:0;cursor:pointer}
   .tile img{width:100%;height:100%;object-fit:cover;display:block}
+  .tile.contain img{object-fit:contain;background:#fff}
   .tile .cap{position:absolute;left:0;right:0;bottom:0;padding:18px 8px 6px;font-size:12px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.55));text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .tile.add{display:grid;place-items:center;border:1.5px dashed var(--line);color:var(--muted);font-size:14px;background:transparent}
+  .tile .badge{position:absolute;top:6px;right:6px;font-size:10px;padding:2px 6px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff}
+  .tile.add{display:grid;place-items:center;border:1.5px dashed var(--line);color:var(--muted);font-size:14px;background:transparent;text-align:center;padding:6px}
   .tile.sel{outline:3px solid var(--ring);outline-offset:-3px}
   .tile.sq{aspect-ratio:4/5}
   .strip{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;scroll-snap-type:x proximity}
@@ -65,6 +68,7 @@
   .sheet.open,.sheet-bg.open{display:block}
   .sheet .handle{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
   .big{width:100%;border-radius:12px;display:block;background:var(--soft)}
+  .big.contain{object-fit:contain;max-height:60dvh;background:#fff}
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:transparent;font-size:13px;cursor:pointer;color:var(--ink)}
   .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
@@ -77,6 +81,12 @@
   @media (prefers-reduced-motion:no-preference){.spinner{animation:spin .9s linear infinite}}
   @keyframes spin{to{transform:rotate(360deg)}}
   .steps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  /* ---- crop tool ---- */
+  .cropWrap{position:relative;width:100%;background:#111;border-radius:12px;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  .cropWrap img{width:100%;display:block;pointer-events:none;-webkit-user-drag:none}
+  .cropBox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.55);touch-action:none}
+  .cropBox .h{position:absolute;width:28px;height:28px;right:-14px;bottom:-14px;border-radius:50%;background:var(--accent);border:2px solid #fff}
+  .cropBox .h.tl{left:-14px;top:-14px;right:auto;bottom:auto}
   /* ---- collage editor (full screen) ---- */
   #editor{position:fixed;inset:0;z-index:30;background:var(--bg);overflow:auto;padding:calc(8px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
   .ed-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
@@ -111,27 +121,29 @@
 </main>
 
 <main id="app" class="hidden">
-  <section id="tab-selfies">
-    <h2>My Selfies</h2>
-    <p class="hint">Mirror selfies you'll reuse for try-ons. Tap one for options.</p>
-    <div class="grid" id="selfieGrid"></div>
+  <section id="tab-models">
+    <h2>My Models</h2>
+    <p class="hint">Your photos, AI versions of you, and reusable AI models. Tap one for options.</p>
+    <div class="chips" id="modelFilter" style="margin-bottom:10px"><button class="chip on" data-f="all">All</button><button class="chip" data-f="photo">My photos</button><button class="chip" data-f="ai_self">AI me</button><button class="chip" data-f="ai_model">AI models</button><button class="chip" data-f="default">Defaults</button></div>
+    <div class="grid" id="modelGrid"></div>
     <input id="selfieFile" type="file" accept="image/*" multiple class="hidden">
   </section>
 
   <section id="tab-clothing" class="hidden">
     <h2>My Clothing</h2>
-    <p class="hint">Amazon product photos with names and affiliate links.</p>
+    <p class="hint">Clean product images with names and affiliate links.</p>
     <div class="row" style="margin-bottom:10px"><button class="btn secondary" id="collageFromClothing">Make a collage from clothing</button></div>
     <div class="grid" id="garmentGrid"></div>
+    <input id="garmentFile" type="file" accept="image/*" class="hidden">
   </section>
 
   <section id="tab-tryon" class="hidden">
     <h2>AI Try-On</h2>
     <div class="card stack">
-      <div><label>Selfie</label><div class="strip" id="pickSelfie"></div></div>
+      <div><label>Model</label><div class="strip" id="pickSelfie"></div></div>
       <div><label>Clothing</label><div class="strip" id="pickGarment"></div></div>
       <div id="srcRow" class="hidden"><label>Clothing image</label>
-        <div class="chips"><button class="chip on" data-src="path">Original photo</button><button class="chip" data-src="cutout">Extracted</button></div></div>
+        <div class="chips"><button class="chip on" data-src="path">Product photo</button><button class="chip" data-src="cutout">Clean cutout</button></div></div>
       <div><label for="preset">Quality</label><select id="preset"></select></div>
       <div id="v16opts" class="row hidden">
         <div><label for="category">Garment type</label>
@@ -141,24 +153,25 @@
       </div>
       <div id="maxopts"><label for="prompt">Instructions (optional)</label>
         <textarea id="prompt" placeholder="e.g. keep the phone, mirror and room exactly as in the photo"></textarea></div>
-      <button class="btn" id="generate" disabled>Generate</button>
+      <button class="btn" id="generate" disabled>Generate try-on</button>
+      <button class="btn secondary" id="p2m" disabled>No model? Generate a model wearing it (Product to Model)</button>
       <div id="runMsg" class="msg"></div>
     </div>
     <div id="result" class="card stack hidden">
       <img class="big" id="out" alt="Try-on result">
-      <div class="row"><button class="btn" id="saveOut">Save to Photos</button><button class="btn secondary" id="reuseOut">Use as selfie</button></div>
+      <div class="row"><button class="btn" id="saveOut">Save to Photos</button><button class="btn secondary" id="reuseOut">Save as model</button></div>
     </div>
   </section>
 
   <section id="tab-collages" class="hidden">
     <h2>Collages</h2>
-    <p class="hint">Arrange clothing into shoppable outfit collages. Tap one to edit.</p>
+    <p class="hint">Clothing only, you + outfit, or an AI model + outfit. Tap one to edit.</p>
     <div class="grid" id="collageGrid"></div>
   </section>
 
   <section id="tab-photos" class="hidden">
     <h2>My Photos</h2>
-    <p class="hint">Everything you've generated. Tap to view, save or delete.</p>
+    <p class="hint">Everything you've generated. Tap to view, cut out, save or delete.</p>
     <div class="grid" id="genGrid"></div>
   </section>
 
@@ -171,7 +184,7 @@
 </main>
 
 <nav id="nav" class="hidden">
-  <button class="tab on" data-tab="selfies"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Selfies</button>
+  <button class="tab on" data-tab="models"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Models</button>
   <button class="tab" data-tab="clothing"><svg viewBox="0 0 24 24"><path d="M8 4l4 2 4-2 4 4-3 2v10H7V10L4 8z"/></svg>Clothing</button>
   <button class="tab" data-tab="tryon"><svg viewBox="0 0 24 24"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg>Try-On</button>
   <button class="tab" data-tab="collages"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="12" rx="1.5"/><rect x="15" y="3" width="6" height="7" rx="1.5"/><rect x="15" y="12" width="6" height="9" rx="1.5"/><rect x="3" y="17" width="10" height="4" rx="1.5"/></svg>Collages</button>
@@ -185,6 +198,7 @@
 <!-- Collage editor -->
 <section id="editor" class="hidden">
   <div class="ed-top"><button class="btn secondary small" id="edClose">‹ Back</button><input id="edName" type="text" placeholder="Collage name" aria-label="Collage name"><button class="btn secondary small" id="edUndo" title="Undo">↶</button><button class="btn secondary small" id="edRedo" title="Redo">↷</button></div>
+  <div class="chips" id="modeRow" style="margin-bottom:8px"><button class="chip" data-mode="clothing">Clothing only</button><button class="chip" data-mode="me">Me + outfit</button><button class="chip" data-mode="model">AI model + outfit</button></div>
   <div class="stage" id="stage"><div class="guide v"></div><div class="guide h"></div></div>
   <div class="tools" id="selTools"></div>
   <div class="tools" id="addTools"></div>
@@ -211,7 +225,8 @@
   const sb = supabase.createClient(SUPABASE_URL, ANON_KEY);
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const state = { me: null, uid: null, selfies: [], garments: [], generations: [], outfits: [], collages: [], shops: [], settings: {}, sel: { selfie: null, garment: null, src: "path" }, urls: new Map(), blobs: new Map() };
+  const state = { me: null, uid: null, selfies: [], models: [], garments: [], generations: [], outfits: [], collages: [], shops: [], settings: {},
+    sel: { selfie: null, model: null, garment: null, src: "path" }, modelFilter: "all", urls: new Map(), blobs: new Map() };
   const DEFAULT_DISCLOSURE = "As an Amazon Associate I earn from qualifying purchases.";
   const SHOP_BASE = location.origin + location.pathname.replace(/index\.html$/, "").replace(/\/?$/, "/") + "shop.html?o=";
 
@@ -244,11 +259,13 @@
     } catch (e) { $("loginMsg").textContent = e.message; await sb.auth.signOut(); }
   }
   function setUsage(used, cap, bal) { state.me.used_today = used; $("usage").textContent = `${used}/${cap} today` + (bal != null ? ` · ${bal} left` : ""); }
+  const cost = (k) => state.me.actions[k];
 
   // ------------------------------------------------------------------ data
   async function loadAll() {
-    const [s, g, gen, o, oi, c, sp, st] = await Promise.all([
+    const [s, m, g, gen, o, oi, c, sp, st] = await Promise.all([
       sb.from("selfies").select("*").order("created_at", { ascending: false }),
+      sb.from("models").select("*").order("created_at", { ascending: false }),
       sb.from("garments").select("*").order("created_at", { ascending: false }),
       sb.from("generations").select("*").order("created_at", { ascending: false }),
       sb.from("outfits").select("*").order("updated_at", { ascending: false }),
@@ -257,13 +274,18 @@
       sb.from("shop_pages").select("*"),
       sb.from("studio_settings").select("*").maybeSingle(),
     ]);
-    state.selfies = s.data || []; state.garments = g.data || []; state.generations = gen.data || []; state.collages = c.data || [];
+    state.selfies = s.data || []; state.models = m.data || []; state.garments = g.data || []; state.generations = gen.data || []; state.collages = c.data || [];
     state.shops = sp.data || []; state.settings = st.data || {};
     state.outfits = (o.data || []).map((x) => ({ ...x, items: (oi.data || []).filter((i) => i.outfit_id === x.id).map((i) => i.garment_id) }));
     renderAll();
   }
-  function renderAll() { renderSelfies(); renderGarments(); renderPickers(); renderPhotos(); renderOutfits(); renderCollages(); }
+  function renderAll() { renderModels(); renderGarments(); renderPickers(); renderPhotos(); renderOutfits(); renderCollages(); }
   const garment = (id) => state.garments.find((g) => g.id === id);
+  // Any "person" image: selfie | model | generation
+  function person(kind, id) {
+    const row = kind === "selfie" ? state.selfies.find((x) => x.id === id) : kind === "model" ? state.models.find((x) => x.id === id) : state.generations.find((x) => x.id === id);
+    return row ? { ...row, kind, label: row.name || row.label || (kind === "generation" ? "Try-on result" : "Photo") } : null;
+  }
 
   // signed URLs (1 h), cached
   async function url(path) {
@@ -275,16 +297,16 @@
   }
   async function fillImgs(root) { for (const img of root.querySelectorAll("img[data-path]")) img.src = await url(img.dataset.path); }
   async function blobOf(path) { return await (await fetch(await url(path))).blob(); }
-  // object URLs for canvas-safe drawing, cached per path
   async function blobUrl(path) { if (!state.blobs.has(path)) state.blobs.set(path, URL.createObjectURL(await blobOf(path))); return state.blobs.get(path); }
 
   // ------------------------------------------------------------------ images
   function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
-  async function shrink(fileOrBlob, maxSide, type = "image/jpeg", q = 0.9) {
+  async function shrink(fileOrBlob, maxSide, type = "image/jpeg", q = 0.9, crop) {
     const u = URL.createObjectURL(fileOrBlob); const img = await loadImg(u); URL.revokeObjectURL(u);
-    const s = Math.min(1, maxSide / Math.max(img.width, img.height));
-    const c = document.createElement("canvas"); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
-    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    const sx = crop ? crop.x * img.width : 0, sy = crop ? crop.y * img.height : 0, sw = crop ? crop.w * img.width : img.width, sh = crop ? crop.h * img.height : img.height;
+    const s = Math.min(1, maxSide / Math.max(sw, sh));
+    const c = document.createElement("canvas"); c.width = Math.round(sw * s); c.height = Math.round(sh * s);
+    c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
     return await new Promise((r) => c.toBlob(r, type, q));
   }
   const toDataUrl = (blob) => new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
@@ -293,11 +315,17 @@
     if (error) throw new Error(error.message); state.urls.delete(path); state.blobs.delete(path);
   }
   async function removeFiles(paths) { const p = paths.filter(Boolean); if (p.length) await sb.storage.from(BUCKET).remove(p); }
-
   async function saveToPhotos(blob, name) {
     const file = new File([blob], name, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch {} }
     else { window.open(URL.createObjectURL(blob), "_blank"); alert("Long-press the image and choose Save to Photos."); }
+  }
+  // Is this image already a clean product shot? (transparent, or near-white edges)
+  async function looksClean(blob) {
+    const img = await loadImg(URL.createObjectURL(blob)); const c = document.createElement("canvas"); c.width = 64; c.height = 64; const ctx = c.getContext("2d");
+    ctx.drawImage(img, 0, 0, 64, 64); const d = ctx.getImageData(0, 0, 64, 64).data; let edge = 0, clean = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { if (x > 2 && x < 61 && y > 2 && y < 61) continue; const i = (y * 64 + x) * 4; edge++; if (d[i + 3] < 16 || (d[i] > 232 && d[i + 1] > 232 && d[i + 2] > 232)) clean++; }
+    return { clean: clean / edge > 0.9, ratio: img.height / img.width };
   }
 
   // ------------------------------------------------------------------ spending guard + runs
@@ -316,29 +344,41 @@
       if (s.status === "completed") return { ...s.result, credits: run.credits };
       if (s.status === "failed") throw new Error("FASHN failed: " + (s.error?.name || "") + " " + (s.error?.message || "") + " (not charged)");
       onTick && onTick(`${s.status.replace("_", " ")}… ${Math.round((Date.now() - t0) / 1000)}s`);
-      if (Date.now() - t0 > 240000) throw new Error("Timed out waiting for FASHN — check My Photos in a minute.");
+      if (Date.now() - t0 > 240000) throw new Error("Timed out waiting for FASHN — check again in a minute.");
     }
   }
   function note(id, text, err) { const el = $(id); if (!el) return; el.innerHTML = (text && !err && /…/.test(text) ? '<span class="spinner"></span> ' : "") + esc(text); el.className = "msg " + (err ? "err" : "ok"); }
 
   // ------------------------------------------------------------------ sheets + tabs
-  function openSheet(html) { $("sheetBody").innerHTML = html; $("sheet").classList.add("open"); $("sheetBg").classList.add("open"); fillImgs($("sheetBody")); }
+  function openSheet(html) { $("sheetBody").innerHTML = html; $("sheet").classList.add("open"); $("sheetBg").classList.add("open"); $("sheet").scrollTop = 0; fillImgs($("sheetBody")); }
   function closeSheet() { $("sheet").classList.remove("open"); $("sheetBg").classList.remove("open"); $("sheetBody").innerHTML = ""; }
   $("sheetBg").addEventListener("click", closeSheet);
   document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
   function showTab(t) {
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
-    ["selfies", "clothing", "tryon", "collages", "photos", "outfits"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
+    ["models", "clothing", "tryon", "collages", "photos", "outfits"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
     window.scrollTo(0, 0);
   }
 
-  // ================================================================== SELFIES
-  function renderSelfies() {
-    const g = $("selfieGrid");
-    g.innerHTML = `<button class="tile add" id="addSelfie">+ Add selfie</button>` +
-      state.selfies.map((s) => `<button class="tile" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""><span class="cap">${esc(s.label || "")}</span></button>`).join("");
-    $("addSelfie").addEventListener("click", () => $("selfieFile").click());
-    g.querySelectorAll(".tile[data-id]").forEach((t) => t.addEventListener("click", () => selfieSheet(t.dataset.id)));
+  // ================================================================== MY MODELS (photos + AI)
+  const MODEL_PRESETS = [
+    ["Studio neutral", "woman in her late 20s, medium build, shoulder-length dark hair, warm smile, neutral studio background"],
+    ["Editorial", "tall woman, slim build, long wavy blonde hair, calm expression, soft grey studio backdrop"],
+    ["Curvy classic", "curvy woman in her 30s, olive skin, dark curly hair, confident pose, light beige backdrop"],
+    ["Minimal street", "woman in her 20s, athletic build, short black hair, relaxed pose, plain white wall"],
+    ["Elegant", "elegant woman in her 40s, silver-streaked hair in a low bun, graceful posture, cream studio background"],
+    ["Fresh", "young woman with red hair and freckles, natural look, standing straight, pale pink backdrop"],
+  ];
+  $("modelFilter").querySelectorAll(".chip").forEach((c) => c.onclick = () => { state.modelFilter = c.dataset.f; $("modelFilter").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); renderModels(); });
+  function renderModels() {
+    const g = $("modelGrid"); const f = state.modelFilter;
+    const photos = f === "all" || f === "photo" ? state.selfies.map((s) => ({ kind: "selfie", row: s, label: s.label || "My photo" })) : [];
+    const ai = state.models.filter((m) => f === "all" || m.kind === f).map((m) => ({ kind: "model", row: m, label: m.name }));
+    g.innerHTML = `<button class="tile add" id="addSelfie">+ Add my photo</button><button class="tile add" id="genModel">✦ Generate model</button>` +
+      [...photos, ...ai].map((e) => `<button class="tile" data-kind="${e.kind}" data-id="${e.row.id}"><img data-path="${esc(e.row.thumb_path || e.row.path)}" alt="">${e.row.cutout_path ? '<span class="badge">cutout</span>' : ""}<span class="cap">${esc(e.label)}</span></button>`).join("");
+    $("addSelfie").onclick = () => $("selfieFile").click();
+    $("genModel").onclick = () => modelGenSheet();
+    g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => personSheet(t.dataset.kind, t.dataset.id));
     fillImgs(g);
   }
   $("selfieFile").addEventListener("change", async (e) => {
@@ -352,28 +392,71 @@
     const { error } = await sb.from("selfies").insert({ id, path: base + ".jpg", thumb_path: base + "_t.jpg", label });
     if (error) throw new Error(error.message);
   }
-  function selfieSheet(id) {
-    const s = state.selfies.find((x) => x.id === id); if (!s) return;
-    openSheet(`<img class="big" data-path="${esc(s.path)}" alt="">
+  function personSheet(kind, id) {
+    const p = person(kind, id); if (!p) return;
+    const table = { selfie: "selfies", model: "models", generation: "generations" }[kind];
+    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Photo</button>${p.cutout_path ? '<button class="chip" data-v="cutout_path">Cutout</button>' : ""}</div>
+      <img class="big" id="pImg" data-path="${esc(p.path)}" alt="">
+      ${p.prompt ? `<p class="kv" style="margin:8px 0">${esc(p.prompt)}</p>` : ""}
       <div class="stack" style="margin-top:12px">
-        <button class="btn" id="sUse">Use in Try-On</button>
-        <button class="btn secondary" id="sSave">Save to Photos</button>
-        <button class="btn danger" id="sDel">Delete</button></div>`);
-    $("sUse").onclick = () => { state.sel.selfie = s.id; closeSheet(); renderPickers(); showTab("tryon"); };
-    $("sSave").onclick = async () => saveToPhotos(await blobOf(s.path), "selfie.jpg");
-    $("sDel").onclick = async () => { if (!confirm("Delete this selfie?")) return; await removeFiles([s.path, s.thumb_path]); await sb.from("selfies").delete().eq("id", s.id); closeSheet(); await loadAll(); };
+        ${kind !== "generation" ? `<div><label>Name</label><input type="text" id="pName" value="${esc(p.label)}"></div>` : ""}
+        <button class="btn" id="pUse">Use in Try-On</button>
+        <button class="btn secondary" id="pCut">${p.cutout_path ? "Redo person cutout" : "Person cutout (remove background)"} · ${cost("bgremove")} credit</button>
+        <button class="btn secondary" id="pSave">Save to Photos</button>
+        ${kind === "generation" ? '<button class="btn secondary" id="pAsModel">Save as model</button>' : ""}
+        <button class="btn danger" id="pDel">Delete</button><div id="pMsg" class="msg"></div></div>`);
+    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("pImg").src = await url(p[c.dataset.v]); });
+    $("pUse").onclick = () => { state.sel.selfie = kind === "model" ? null : (kind === "selfie" ? id : null); state.sel.model = kind === "model" ? id : (kind === "generation" ? "gen:" + id : null); closeSheet(); renderPickers(); showTab("tryon"); };
+    $("pCut").onclick = async () => {
+      if (!confirmSpend(cost("bgremove"), "Remove the background around the person (transparent PNG for collages).")) return;
+      try { note("pMsg", "Cutting out…"); await runAndWait("/bgremove", { target: kind, id }, (t) => note("pMsg", t)); await loadAll(); personSheet(kind, id); note("pMsg", "Cutout ready — see the Cutout tab above."); }
+      catch (e) { note("pMsg", e.message, true); }
+    };
+    $("pSave").onclick = async () => saveToPhotos(await blobOf(p.path), "closetiq-studio.jpg");
+    const nameEl = $("pName"); if (nameEl) nameEl.onchange = async () => { await sb.from(table).update(kind === "selfie" ? { label: nameEl.value.trim() } : { name: nameEl.value.trim() }).eq("id", id); loadAll(); };
+    if (kind === "generation") $("pAsModel").onclick = async () => { await addSelfieFromBlob(await blobOf(p.path), "AI me"); await loadAll(); note("pMsg", "Saved under My Models → My photos."); };
+    $("pDel").onclick = async () => { if (!confirm("Delete this?")) return; await removeFiles([p.path, p.thumb_path, p.cutout_path]); await sb.from(table).delete().eq("id", id); closeSheet(); await loadAll(); };
+  }
+  function modelGenSheet() {
+    let face = null, m = "fast";
+    const total = () => cost(m === "fast" ? "model_fast" : "model_balanced") + (face ? cost("face_reference") : 0);
+    openSheet(`<h3>Generate a model</h3><div class="stack">
+      <div><label>Quick starts</label><div class="chips" id="mgPresets">${MODEL_PRESETS.map(([n], i) => `<button class="chip" data-i="${i}">${n}</button>`).join("")}</div></div>
+      <div><label>Describe the model</label><textarea id="mgPrompt" placeholder="e.g. woman in her 30s, medium build, long brown hair, soft smile, neutral background"></textarea></div>
+      <div><label>Name</label><input type="text" id="mgName" placeholder="Model name"></div>
+      <div><label>Look like me (optional, +${cost("face_reference")} credits)</label><div class="strip" id="mgFace">${state.selfies.map((s) => `<button class="tile" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""></button>`).join("") || '<div class="empty">Add a photo of yourself first.</div>'}</div></div>
+      <div><label>Quality</label><div class="chips"><button class="chip on" data-m="fast">Fast · ${cost("model_fast")} credit</button><button class="chip" data-m="balanced">Balanced · ${cost("model_balanced")} credits</button></div></div>
+      <p class="hint" id="mgCost"></p>
+      <button class="btn" id="mgGo">Generate</button><div id="mgMsg" class="msg"></div></div>`);
+    const refresh = () => { $("mgCost").textContent = `${total()} credit${total() > 1 ? "s" : ""} for one image${face ? " (includes face reference)" : ""}.`; };
+    $("mgPresets").querySelectorAll(".chip").forEach((c) => c.onclick = () => { $("mgPrompt").value = MODEL_PRESETS[c.dataset.i][1]; if (!$("mgName").value) $("mgName").value = MODEL_PRESETS[c.dataset.i][0]; });
+    $("mgFace").querySelectorAll(".tile").forEach((t) => t.onclick = () => { face = face === t.dataset.id ? null : t.dataset.id; $("mgFace").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k.dataset.id === face)); refresh(); });
+    $("sheetBody").querySelectorAll("[data-m]").forEach((c) => c.onclick = () => { m = c.dataset.m; $("sheetBody").querySelectorAll("[data-m]").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
+    refresh();
+    $("mgGo").onclick = async () => {
+      const prompt = $("mgPrompt").value.trim(); if (!prompt) { note("mgMsg", "Describe the model first.", true); return; }
+      if (!confirmSpend(total(), face ? "Generate an AI version of you (Model Create + face reference)." : "Generate a new AI model (Model Create).")) return;
+      $("mgGo").disabled = true;
+      try {
+        const s = face ? state.selfies.find((x) => x.id === face) : null;
+        const r = await runAndWait("/model-create", { prompt, mode: m, name: $("mgName").value.trim() || (face ? "AI me" : "Model"), face_path: s?.path, kind: face ? "ai_self" : "ai_model" }, (t) => note("mgMsg", t));
+        await loadAll(); closeSheet(); personSheet("model", r.model_id);
+      } catch (e) { note("mgMsg", e.message, true); $("mgGo").disabled = false; }
+    };
+    fillImgs($("sheetBody"));
   }
 
-  // ================================================================== CLOTHING
+  // ================================================================== CLOTHING (clean import)
   const CATS = ["tops", "bottoms", "one-pieces", "shoes", "bag", "accessory", "other"];
   function renderGarments() {
     const g = $("garmentGrid");
     g.innerHTML = `<button class="tile add" id="addGarment">+ Add clothing</button>` +
-      state.garments.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.thumb_path || x.path)}" alt=""><span class="cap">${esc(x.name)}</span></button>`).join("");
-    $("addGarment").addEventListener("click", garmentForm);
-    g.querySelectorAll(".tile[data-id]").forEach((t) => t.addEventListener("click", () => garmentSheet(t.dataset.id)));
+      state.garments.map((x) => `<button class="tile contain" data-id="${x.id}"><img data-path="${esc(x.cutout_path || x.thumb_path || x.path)}" alt="">${x.cutout_path ? '<span class="badge">clean</span>' : ""}<span class="cap">${esc(x.name)}</span></button>`).join("");
+    $("addGarment").onclick = () => $("garmentFile").click();
+    g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => garmentSheet(t.dataset.id));
     fillImgs(g);
   }
+  $("garmentFile").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) importWizard(f); });
   $("collageFromClothing").addEventListener("click", () => newCollageSheet(null));
   function garmentFields(x = {}) {
     return `<div><label>Name</label><input type="text" id="gName" value="${esc(x.name)}" placeholder="Black ribbed bodysuit"></div>
@@ -382,14 +465,13 @@
       <div><label>Amazon product link</label><input type="url" id="gUrl" value="${esc(x.affiliate_url)}" placeholder="Paste any Amazon product URL" inputmode="url">
         <div class="kv" id="gUrlNote" style="margin-top:4px">${state.settings.amazon_tag ? "Your tracking ID is added automatically." : "Set your Amazon tracking ID under Account to auto-tag links."}</div></div>
       <div><label>Notes</label><textarea id="gNotes">${esc(x.notes)}</textarea></div>
-      <label style="display:flex;gap:8px;align-items:center;text-transform:none;font-size:14px;color:var(--ink)"><input type="checkbox" id="gPublic" ${x.public_ok ? "checked" : ""}> I have permission to show this original photo publicly</label>`;
+      <label class="inline"><input type="checkbox" id="gPublic" ${x.public_ok ? "checked" : ""}> I have permission to show the original photo publicly</label>`;
   }
   function readGarmentFields() {
     const tagged = tagAmazon($("gUrl").value, state.settings.amazon_tag);
     return { name: $("gName").value.trim(), brand: $("gBrand").value.trim(), category: $("gCat").value, notes: $("gNotes").value.trim(), public_ok: $("gPublic").checked,
       affiliate_url: tagged.url, product_url: $("gUrl").value.trim(), asin: tagged.asin || null };
   }
-  // Amazon Associates link helper: one tag per link, plain amazon.com URLs, short links left as they are.
   function tagAmazon(input, tag) {
     input = (input || "").trim(); if (!input) return { url: "", asin: null, note: "" };
     try {
@@ -404,105 +486,175 @@
       return { url: clean.toString(), asin, note: tag ? `Clean tagged link · ASIN ${asin}` : `ASIN ${asin} · no tracking ID set yet` };
     } catch { return { url: input, asin: null, note: "That doesn't look like a valid URL." }; }
   }
-  function garmentForm() {
+
+  // Import wizard: crop the product out of a screenshot → optional AI extraction with preview → details → save.
+  async function importWizard(file) {
+    const srcUrl = URL.createObjectURL(file); const info = await looksClean(file);
+    let crop = { x: 0, y: 0, w: 1, h: 1 }, cutout = null, cutoutPath = null, seed = 42;
     openSheet(`<h3>Add clothing</h3><div class="stack">
-      <div><label>Product photo</label><input type="file" id="gFile" accept="image/*"></div>${garmentFields()}
-      <button class="btn" id="gSave">Save</button><div id="gMsg" class="msg err"></div></div>`);
+      <p class="hint" id="iwHint">${info.ratio > 1.8 ? "This looks like a screenshot. Drag the box to frame just the product you want (move it, or drag the corner handles)." : info.clean ? "This already looks like a clean product image — no AI processing needed." : "Frame the product, then clean it up if needed."}</p>
+      <div class="cropWrap" id="cropWrap"><img id="cropImg" src="${srcUrl}" alt=""><div class="cropBox" id="cropBox"><div class="h tl"></div><div class="h"></div></div></div>
+      <div class="row"><button class="btn secondary small" id="iwReset">Reset frame</button><button class="btn secondary small" id="iwFull">Use whole image</button></div>
+      <div id="iwPreviewWrap" class="hidden"><label>AI result</label><img class="big contain" id="iwPreview" alt=""><div class="row" style="margin-top:8px"><button class="btn small" id="iwKeep">Keep</button><button class="btn secondary small" id="iwRetry">Retry · ${cost("extract")} credit</button><button class="btn secondary small" id="iwOrig">Use original</button></div></div>
+      <button class="btn secondary" id="iwExtract" ${info.clean ? "disabled" : ""}>Person wearing it? Extract clothing only · ${cost("extract")} credit</button>
+      ${garmentFields()}
+      <button class="btn" id="iwSave">Save to My Clothing</button><div id="iwMsg" class="msg"></div></div>`);
+    // crop box interactions
+    const wrap = $("cropWrap"), box = $("cropBox"), img = $("cropImg");
+    const paint = () => { const W = wrap.clientWidth, H = wrap.clientHeight; box.style.left = crop.x * W + "px"; box.style.top = crop.y * H + "px"; box.style.width = crop.w * W + "px"; box.style.height = crop.h * H + "px"; };
+    img.onload = () => { if (info.ratio > 1.8) crop = { x: 0.08, y: 0.18, w: 0.84, h: 0.5 }; paint(); };
+    let drag = null;
+    box.addEventListener("pointerdown", (e) => { e.preventDefault(); box.setPointerCapture(e.pointerId); const tl = e.target.classList.contains("tl"), br = e.target.classList.contains("h") && !tl; drag = { mode: br ? "br" : tl ? "tl" : "move", x: e.clientX, y: e.clientY, c: { ...crop } }; });
+    box.addEventListener("pointermove", (e) => {
+      if (!drag) return; const W = wrap.clientWidth, H = wrap.clientHeight, dx = (e.clientX - drag.x) / W, dy = (e.clientY - drag.y) / H, c = drag.c;
+      if (drag.mode === "move") crop = { ...c, x: Math.min(1 - c.w, Math.max(0, c.x + dx)), y: Math.min(1 - c.h, Math.max(0, c.y + dy)) };
+      else if (drag.mode === "br") crop = { ...c, w: Math.min(1 - c.x, Math.max(0.1, c.w + dx)), h: Math.min(1 - c.y, Math.max(0.1, c.h + dy)) };
+      else { const nx = Math.min(c.x + c.w - 0.1, Math.max(0, c.x + dx)), ny = Math.min(c.y + c.h - 0.1, Math.max(0, c.y + dy)); crop = { x: nx, y: ny, w: c.w + (c.x - nx), h: c.h + (c.y - ny) }; }
+      paint();
+    });
+    const end = () => { drag = null; }; box.addEventListener("pointerup", end); box.addEventListener("pointercancel", end);
+    $("iwReset").onclick = () => { crop = info.ratio > 1.8 ? { x: 0.08, y: 0.18, w: 0.84, h: 0.5 } : { x: 0, y: 0, w: 1, h: 1 }; paint(); };
+    $("iwFull").onclick = () => { crop = { x: 0, y: 0, w: 1, h: 1 }; paint(); };
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
-    $("gSave").onclick = async () => {
-      const f = $("gFile").files[0]; if (!f) { $("gMsg").textContent = "Choose a photo first."; return; }
-      $("gSave").disabled = true;
+    const cropped = () => shrink(file, 1600, "image/jpeg", 0.9, crop);
+    async function extract() {
+      if (!confirmSpend(cost("extract"), "Recreate just the clothing from the framed area (FASHN Edit). You'll preview it before saving.")) return;
+      try {
+        note("iwMsg", "Extracting…"); const r = await runAndWait("/extract", { image: await toDataUrl(await cropped()), seed }, (t) => note("iwMsg", t));
+        cutoutPath = r.path; cutout = await blobOf(r.path); $("iwPreview").src = URL.createObjectURL(cutout); $("iwPreviewWrap").classList.remove("hidden"); note("iwMsg", `Preview ready (${r.credits} credit). Keep it, retry with a different seed, or use the original.`);
+      } catch (e) { note("iwMsg", e.message, true); }
+    }
+    $("iwExtract").onclick = extract;
+    $("iwRetry").onclick = () => { seed = Math.floor(Math.random() * 1e9); extract(); };
+    $("iwKeep").onclick = () => { note("iwMsg", "Cutout will be saved with this item."); $("iwKeep").classList.add("on"); };
+    $("iwOrig").onclick = () => { cutout = null; cutoutPath = null; $("iwPreviewWrap").classList.add("hidden"); note("iwMsg", "Using the framed original."); };
+    $("iwSave").onclick = async () => {
+      $("iwSave").disabled = true; note("iwMsg", "Saving…");
       try {
         const id = crypto.randomUUID(), base = `${state.uid}/garments/${id}`;
-        const [full, thumb] = await Promise.all([shrink(f, 1600), shrink(f, 480, "image/jpeg", 0.8)]);
-        await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
-        const { error } = await sb.from("garments").insert({ id, path: base + ".jpg", thumb_path: base + "_t.jpg", ...readGarmentFields() });
+        const [source, full, thumb] = await Promise.all([shrink(file, 1600), cropped(), shrink(file, 480, "image/jpeg", 0.8, crop)]);
+        await upload(base + "_src.jpg", source); await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
+        let cutout_path = null;
+        if (cutout) { cutout_path = base + "_x.png"; await upload(cutout_path, cutout); if (cutoutPath) removeFiles([cutoutPath]); }
+        const { error } = await sb.from("garments").insert({ id, source_path: base + "_src.jpg", path: base + ".jpg", thumb_path: base + "_t.jpg", cutout_path, ...readGarmentFields() });
         if (error) throw new Error(error.message);
         closeSheet(); await loadAll();
-      } catch (e) { $("gMsg").textContent = e.message; $("gSave").disabled = false; }
+      } catch (e) { note("iwMsg", e.message, true); $("iwSave").disabled = false; }
     };
   }
   function garmentSheet(id) {
     const x = garment(id); if (!x) return;
-    const a = state.me.actions;
-    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Original</button>${x.cutout_path ? '<button class="chip" data-v="cutout_path">Extracted</button>' : ""}</div>
-      <img class="big" id="gImg" data-path="${esc(x.path)}" alt="">
+    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip ${x.cutout_path ? "" : "on"}" data-v="path">Product photo</button>${x.cutout_path ? '<button class="chip on" data-v="cutout_path">Clean cutout</button>' : ""}${x.source_path ? '<button class="chip" data-v="source_path">Original upload</button>' : ""}</div>
+      <img class="big contain" id="gImg" data-path="${esc(x.cutout_path || x.path)}" alt="">
       <div class="stack" style="margin-top:12px">${garmentFields(x)}
         <button class="btn" id="gUpdate">Save changes</button>
         <button class="btn secondary" id="gTry">Try on</button>
-        <button class="btn secondary" id="gExtract">Extract clothing only · ${a.extract} credit</button>
-        <button class="btn secondary" id="gBg" ${x.cutout_path ? "" : "disabled"}>Make background transparent · ${a.bgremove} credit</button>
+        <button class="btn secondary" id="gExtract">${x.cutout_path ? "Redo extraction" : "Extract clothing only"} · ${cost("extract")} credit</button>
+        <button class="btn secondary" id="gBg" ${x.cutout_path ? "" : "disabled"}>Make background transparent · ${cost("bgremove")} credit</button>
         ${x.affiliate_url ? `<a class="btn secondary" href="${esc(x.affiliate_url)}" target="_blank" rel="noopener">Open Amazon link</a>` : ""}
         <button class="btn danger" id="gDel">Delete</button><div id="gMsg" class="msg"></div></div>`);
-    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => {
-      $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("gImg").src = await url(x[c.dataset.v]); });
+    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("gImg").src = await url(x[c.dataset.v]); });
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
     $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
-    $("gTry").onclick = () => { state.sel.garment = x.id; closeSheet(); renderPickers(); showTab("tryon"); };
-    $("gExtract").onclick = () => spendAction("/extract", a.extract, "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
-    $("gBg").onclick = () => spendAction("/bgremove", a.bgremove, "Remove the background from the extracted clothing (transparent PNG).", x);
-    $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await removeFiles([x.path, x.thumb_path, x.cutout_path]); await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
+    $("gTry").onclick = () => { state.sel.garment = x.id; state.sel.src = x.cutout_path ? "cutout" : "path"; closeSheet(); renderPickers(); showTab("tryon"); };
+    $("gExtract").onclick = () => spendAction("/extract", cost("extract"), "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
+    $("gBg").onclick = () => spendAction("/bgremove", cost("bgremove"), "Remove the background from the extracted clothing (transparent PNG).", x);
+    $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await removeFiles([x.path, x.thumb_path, x.cutout_path, x.source_path]); await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
   }
   async function spendAction(path, credits, what, x) {
     if (!confirmSpend(credits, what)) return;
-    try { note("gMsg", "Starting…"); const r = await runAndWait(path, { garment_id: x.id }, (t) => note("gMsg", t));
-      state.urls.delete(r.cutout_path); state.blobs.delete(r.cutout_path); await loadAll(); garmentSheet(x.id); note("gMsg", `Done — ${r.credits} credit used. See the Extracted tab above.`);
+    try { note("gMsg", "Working…"); const r = await runAndWait(path, { garment_id: x.id }, (t) => note("gMsg", t));
+      state.urls.delete(r.cutout_path); state.blobs.delete(r.cutout_path); await loadAll(); garmentSheet(x.id); note("gMsg", `Done — ${r.credits} credit used.`);
     } catch (e) { note("gMsg", e.message, true); }
   }
 
   // ================================================================== TRY-ON
+  function selectedPerson() {
+    if (state.sel.model && state.sel.model.startsWith("gen:")) return person("generation", state.sel.model.slice(4));
+    if (state.sel.model) return person("model", state.sel.model);
+    if (state.sel.selfie) return person("selfie", state.sel.selfie);
+    return null;
+  }
   function renderPickers() {
     const ps = $("pickSelfie"), pg = $("pickGarment");
-    ps.innerHTML = state.selfies.map((s) => `<button class="tile ${state.sel.selfie === s.id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""></button>`).join("") || '<div class="empty">Add a selfie first</div>';
-    pg.innerHTML = state.garments.map((g) => `<button class="tile ${state.sel.garment === g.id ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first</div>';
-    ps.querySelectorAll(".tile").forEach((t) => t.onclick = () => { state.sel.selfie = t.dataset.id; renderPickers(); });
-    pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => { state.sel.garment = t.dataset.id; state.sel.src = "path"; renderPickers(); });
+    const people = [...state.selfies.map((s) => ({ k: "s", id: s.id, p: s.thumb_path || s.path, l: s.label || "My photo" })), ...state.models.map((m) => ({ k: "m", id: m.id, p: m.thumb_path || m.path, l: m.name }))];
+    const cur = state.sel.model ? "m" + state.sel.model : state.sel.selfie ? "s" + state.sel.selfie : "";
+    ps.innerHTML = people.map((e) => `<button class="tile ${cur === e.k + e.id ? "sel" : ""}" data-k="${e.k}" data-id="${e.id}"><img data-path="${esc(e.p)}" alt=""><span class="cap">${esc(e.l)}</span></button>`).join("") || '<div class="empty">Add a photo or generate a model first</div>';
+    pg.innerHTML = state.garments.map((g) => `<button class="tile contain ${state.sel.garment === g.id ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first</div>';
+    ps.querySelectorAll(".tile").forEach((t) => t.onclick = () => { if (t.dataset.k === "m") { state.sel.model = t.dataset.id; state.sel.selfie = null; } else { state.sel.selfie = t.dataset.id; state.sel.model = null; } renderPickers(); });
+    pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => { const g = garment(t.dataset.id); state.sel.garment = g.id; state.sel.src = g.cutout_path ? "cutout" : "path"; renderPickers(); });
     const g = garment(state.sel.garment);
     $("srcRow").classList.toggle("hidden", !(g && g.cutout_path));
     $("srcRow").querySelectorAll(".chip").forEach((c) => { c.classList.toggle("on", c.dataset.src === state.sel.src); c.onclick = () => { state.sel.src = c.dataset.src; renderPickers(); }; });
-    $("generate").disabled = !(state.sel.selfie && state.sel.garment);
+    $("generate").disabled = !(selectedPerson() && g); $("p2m").disabled = !g;
     fillImgs(ps); fillImgs(pg);
   }
   function togglePresetOpts() { const isMax = $("preset").value.startsWith("max"); $("v16opts").classList.toggle("hidden", isMax); $("maxopts").classList.toggle("hidden", !isMax); }
   $("preset").addEventListener("change", togglePresetOpts);
+  function showResult(r, g) {
+    url(r.path).then((u) => { $("out").src = u; }); $("result").classList.remove("hidden");
+    $("saveOut").onclick = async () => saveToPhotos(await blobOf(r.path), "closetiq-studio.jpg");
+    $("reuseOut").onclick = async () => { await addSelfieFromBlob(await blobOf(r.path), g ? g.name : "AI me"); await loadAll(); alert("Saved under My Models → My photos."); };
+  }
   $("generate").addEventListener("click", async () => {
-    const s = state.selfies.find((x) => x.id === state.sel.selfie), g = garment(state.sel.garment);
-    const p = state.me.presets[$("preset").value];
-    if (!confirmSpend(p.credits, `Try on "${g.name}" (${p.label}).`)) return;
+    const who = selectedPerson(), g = garment(state.sel.garment); const p = state.me.presets[$("preset").value];
+    if (!confirmSpend(p.credits, `Try "${g.name}" on ${who.label} (${p.label}).`)) return;
     $("generate").disabled = true; $("result").classList.add("hidden"); note("runMsg", "Starting…");
     try {
-      const r = await runAndWait("/run", { preset: $("preset").value, selfie_path: s.path,
+      const r = await runAndWait("/run", { preset: $("preset").value, selfie_path: who.path,
         garment_path: state.sel.src === "cutout" && g.cutout_path ? g.cutout_path : g.path,
         category: $("category").value, garment_photo_type: $("gpt").value, prompt: $("prompt").value.trim() || undefined,
-        meta: { kind: "tryon", selfie_id: s.id, garment_id: g.id } }, (t) => note("runMsg", t));
-      $("out").src = await url(r.path); $("result").classList.remove("hidden"); note("runMsg", `Done — ${r.credits} credit(s) used. Saved to My Photos.`);
-      $("saveOut").onclick = async () => saveToPhotos(await blobOf(r.path), "closetiq-studio.jpg");
-      $("reuseOut").onclick = async () => { await addSelfieFromBlob(await blobOf(r.path), g.name); await loadAll(); alert("Added to My Selfies."); };
-      loadAll();
+        meta: { kind: "tryon", selfie_id: who.kind === "selfie" ? who.id : null, model_id: who.kind === "model" ? who.id : null, garment_id: g.id } }, (t) => note("runMsg", t));
+      showResult(r, g); note("runMsg", `Done — ${r.credits} credit(s) used. Saved to My Photos.`); loadAll();
     } catch (e) { note("runMsg", e.message, true); }
     $("generate").disabled = false;
+  });
+  $("p2m").addEventListener("click", () => {
+    const g = garment(state.sel.garment); let face = null, m = "fast";
+    const total = () => cost(m === "fast" ? "p2m_fast" : "p2m_balanced") + (face ? cost("face_reference") : 0);
+    openSheet(`<h3>Product to Model</h3><p class="hint">FASHN generates a new model wearing "${esc(g.name)}". Optional: make it look like you (+${cost("face_reference")} credits).</p><div class="stack">
+      <div><label>Styling / scene (optional)</label><textarea id="p2mPrompt" placeholder="e.g. full body, neutral studio, natural pose"></textarea></div>
+      <div><label>Look like me</label><div class="strip" id="p2mFace">${state.selfies.map((s) => `<button class="tile" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""></button>`).join("") || '<div class="empty">Add a photo of yourself first.</div>'}</div></div>
+      <div class="chips"><button class="chip on" data-m="fast">Fast · ${cost("p2m_fast")}</button><button class="chip" data-m="balanced">Balanced · ${cost("p2m_balanced")}</button></div>
+      <p class="hint" id="p2mCost"></p><button class="btn" id="p2mGo">Generate</button><div id="p2mMsg" class="msg"></div></div>`);
+    const refresh = () => { $("p2mCost").textContent = `${total()} credit${total() > 1 ? "s" : ""}.`; };
+    $("p2mFace").querySelectorAll(".tile").forEach((t) => t.onclick = () => { face = face === t.dataset.id ? null : t.dataset.id; $("p2mFace").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k.dataset.id === face)); refresh(); });
+    $("sheetBody").querySelectorAll("[data-m]").forEach((c) => c.onclick = () => { m = c.dataset.m; $("sheetBody").querySelectorAll("[data-m]").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
+    refresh();
+    $("p2mGo").onclick = async () => {
+      if (!confirmSpend(total(), `Generate a model wearing "${g.name}" (Product to Model).`)) return; $("p2mGo").disabled = true;
+      try { const s = face ? state.selfies.find((x) => x.id === face) : null;
+        const r = await runAndWait("/product-to-model", { garment_id: g.id, prompt: $("p2mPrompt").value.trim() || undefined, mode: m, face_path: s?.path, face_selfie_id: s?.id }, (t) => note("p2mMsg", t));
+        closeSheet(); showResult(r, g); note("runMsg", `Done — ${r.credits} credit(s). Saved to My Photos.`); loadAll();
+      } catch (e) { note("p2mMsg", e.message, true); $("p2mGo").disabled = false; }
+    };
+    fillImgs($("sheetBody"));
   });
 
   // ================================================================== PHOTOS
   function renderPhotos() {
     const g = $("genGrid");
-    g.innerHTML = state.generations.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.path)}" loading="lazy" alt=""></button>`).join("") || '<div class="empty">Nothing generated yet.</div>';
+    g.innerHTML = state.generations.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.path)}" loading="lazy" alt="">${x.cutout_path ? '<span class="badge">cutout</span>' : ""}</button>`).join("") || '<div class="empty">Nothing generated yet.</div>';
     g.querySelectorAll(".tile").forEach((t) => t.onclick = () => photoSheet(t.dataset.id));
     fillImgs(g);
   }
   function photoSheet(id) {
     const x = state.generations.find((p) => p.id === id); if (!x) return;
     const g = garment(x.garment_id), o = state.outfits.find((q) => q.id === x.outfit_id);
-    openSheet(`<img class="big" data-path="${esc(x.path)}" alt="">
+    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Photo</button>${x.cutout_path ? '<button class="chip" data-v="cutout_path">Cutout</button>' : ""}</div>
+      <img class="big" id="phImg" data-path="${esc(x.path)}" alt="">
       <p class="kv" style="margin:8px 0">${esc(new Date(x.created_at).toLocaleString())} · ${esc(x.preset || x.kind)} · ${x.credits} credit(s)${g ? " · " + esc(g.name) : ""}${o ? " · " + esc(o.name) : ""}</p>
       <div class="stack"><button class="btn" id="pSave">Save to Photos</button>
-        <button class="btn secondary" id="pReuse">Use as selfie</button>
+        <button class="btn secondary" id="pCut">${x.cutout_path ? "Redo person cutout" : "Person cutout for collages"} · ${cost("bgremove")} credit</button>
+        <button class="btn secondary" id="pReuse">Use as model for another try-on</button>
         ${o ? '<button class="btn secondary" id="pHero">Set as outfit cover</button>' : ""}
-        <button class="btn danger" id="pDel">Delete</button></div>`);
+        <button class="btn danger" id="pDel">Delete</button><div id="pMsg" class="msg"></div></div>`);
+    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("phImg").src = await url(x[c.dataset.v]); });
     $("pSave").onclick = async () => saveToPhotos(await blobOf(x.path), "closetiq-studio.jpg");
-    $("pReuse").onclick = async () => { await addSelfieFromBlob(await blobOf(x.path), g ? g.name : ""); await loadAll(); alert("Added to My Selfies."); };
+    $("pCut").onclick = async () => { if (!confirmSpend(cost("bgremove"), "Remove the background around the person.")) return; try { note("pMsg", "Cutting out…"); await runAndWait("/bgremove", { target: "generation", id: x.id }, (t) => note("pMsg", t)); await loadAll(); photoSheet(id); note("pMsg", "Cutout ready."); } catch (e) { note("pMsg", e.message, true); } };
+    $("pReuse").onclick = () => { state.sel.model = "gen:" + x.id; state.sel.selfie = null; closeSheet(); renderPickers(); showTab("tryon"); };
     if (o) $("pHero").onclick = async () => { await sb.from("outfits").update({ hero_generation_id: x.id }).eq("id", o.id); await loadAll(); closeSheet(); };
-    $("pDel").onclick = async () => { if (!confirm("Delete this photo?")) return; await removeFiles([x.path]); await sb.from("generations").delete().eq("id", x.id); closeSheet(); await loadAll(); };
+    $("pDel").onclick = async () => { if (!confirm("Delete this photo?")) return; await removeFiles([x.path, x.cutout_path]); await sb.from("generations").delete().eq("id", x.id); closeSheet(); await loadAll(); };
   }
 
   // ================================================================== OUTFITS
@@ -512,7 +664,7 @@
       const hero = state.generations.find((g) => g.id === o.hero_generation_id);
       const items = o.items.map(garment).filter(Boolean), links = items.filter((i) => i.affiliate_url).length;
       return `<button class="card row" data-id="${o.id}" style="text-align:left;cursor:pointer">
-        <div style="flex:0 0 64px"><div class="tile" style="width:64px"><img data-path="${esc(hero ? hero.path : (items[0]?.thumb_path || ""))}" alt=""></div></div>
+        <div style="flex:0 0 64px"><div class="tile" style="width:64px"><img data-path="${esc(hero ? hero.path : (items[0]?.cutout_path || items[0]?.thumb_path || ""))}" alt=""></div></div>
         <div><strong>${esc(o.name)}</strong><div class="kv">${items.length} item${items.length === 1 ? "" : "s"} · ${links} link${links === 1 ? "" : "s"}</div></div></button>`;
     }).join("") || '<div class="empty">No outfits yet.</div>';
     list.querySelectorAll("[data-id]").forEach((b) => b.onclick = () => outfitSheet(b.dataset.id));
@@ -524,7 +676,7 @@
     openSheet(`<h3>${o ? "Edit outfit" : "New outfit"}</h3><div class="stack">
       <div><label>Name</label><input type="text" id="oName" value="${esc(o?.name || "")}" placeholder="Date night in black"></div>
       <div><label>Caption for posts</label><textarea id="oCap" placeholder="Links below 👇">${esc(o?.caption || "")}</textarea></div>
-      <div><label>Pick clothing</label><div class="grid" id="oPick">${state.garments.map((g) => `<button class="tile ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("")}</div></div>
+      <div><label>Pick clothing</label><div class="grid" id="oPick">${state.garments.map((g) => `<button class="tile contain ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("")}</div></div>
       <button class="btn" id="oSave">Save outfit</button><div id="oMsg" class="msg err"></div></div>`);
     $("oPick").querySelectorAll(".tile").forEach((t) => t.onclick = () => { chosen.has(t.dataset.id) ? chosen.delete(t.dataset.id) : chosen.add(t.dataset.id); t.classList.toggle("sel"); });
     $("oSave").onclick = async () => {
@@ -547,21 +699,20 @@
     openSheet(`<h3>${esc(o.name)}</h3>
       ${hero ? `<img class="big" data-path="${esc(hero.path)}" alt="">` : ""}
       <div class="stack" style="margin-top:10px">
-        <div class="strip">${items.map((g) => `<div class="tile"><img data-path="${esc(g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></div>`).join("")}</div>
+        <div class="strip">${items.map((g) => `<div class="tile contain"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></div>`).join("")}</div>
         <div class="card links"><strong>Links</strong><div class="kv" style="white-space:pre-wrap;margin-top:6px">${esc(linksText(o.name, o.caption, items))}</div></div>
         <button class="btn" id="oCopy">Copy caption + links</button>
         <button class="btn secondary" id="oCollage">Collage builder</button>
         <button class="btn secondary" id="oTry">Try on this outfit</button>
         <button class="btn secondary" id="oEdit">Edit items</button>
         <button class="btn danger" id="oDel">Delete outfit</button><div id="oMsg" class="msg"></div></div>`);
-    $("oCopy").onclick = async () => { try { await navigator.clipboard.writeText(linksText(o.name, o.caption, items)); note("oMsg", "Copied."); } catch { note("oMsg", "Copy failed — select the text above.", true); } };
+    $("oCopy").onclick = () => copyText(linksText(o.name, o.caption, items), "oMsg");
     $("oCollage").onclick = async () => {
       closeSheet();
       const existing = state.collages.find((c) => c.outfit_id === o.id);
       if (existing) return openEditor(existing);
-      // migrate a layout saved by the earlier per-outfit editor, if any
       const old = o.layout && o.layout.boxes;
-      const layout = old ? { v: 2, size: "portrait", bg: BG_NAMED[o.layout.bg] || "#f6efe4", layers: o.layout.boxes.map((b) => ({ id: crypto.randomUUID(), kind: "item", g: b.g, x: b.x + b.w / 2, y: b.y + b.w * 0.6, w: b.w, rot: 0 })) }
+      const layout = old ? { v: 2, mode: "clothing", size: "portrait", bg: BG_NAMED[o.layout.bg] || "#f6efe4", layers: o.layout.boxes.map((b) => ({ id: newId(), kind: "item", g: b.g, x: b.x + b.w / 2, y: b.y + b.w * 0.6, w: b.w, rot: 0 })) }
                          : makeLayout(items.map((g) => g.id), "grid");
       const { data, error } = await sb.from("collages").insert({ name: o.name, outfit_id: o.id, layout }).select("*").single();
       if (error) return alert(error.message);
@@ -571,41 +722,39 @@
     $("oEdit").onclick = () => outfitEditor(o);
     $("oDel").onclick = async () => { if (!confirm(`Delete "${o.name}"? (Clothing, collages and photos stay.)`)) return; await sb.from("outfits").delete().eq("id", o.id); closeSheet(); await loadAll(); };
   }
-
-  // ---------------------------------------------------------------- outfit try-on (single-pass vs sequential)
   function outfitTrySheet(o, items) {
-    const p = state.me.presets; const cost = (k) => p[k].credits;
+    const p = state.me.presets; const pc = (k) => p[k].credits;
+    const people = [...state.selfies.map((s) => ({ k: "selfie", id: s.id, p: s.thumb_path || s.path })), ...state.models.map((m) => ({ k: "model", id: m.id, p: m.thumb_path || m.path }))];
+    let who = selectedPerson();
     openSheet(`<h3>Try on: ${esc(o.name)}</h3><div class="stack">
-      <div><label>Selfie</label><div class="strip" id="otSelfie">${state.selfies.map((s) => `<button class="tile ${state.sel.selfie === s.id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""></button>`).join("")}</div></div>
+      <div><label>Model</label><div class="strip" id="otSelfie">${people.map((e) => `<button class="tile ${who && who.kind === e.k && who.id === e.id ? "sel" : ""}" data-k="${e.k}" data-id="${e.id}"><img data-path="${esc(e.p)}" alt=""></button>`).join("")}</div></div>
       <div><label>Quality</label><select id="otPreset">${Object.entries(p).filter(([k]) => k.startsWith("max")).map(([k, v]) => `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(v.label)} · ${v.credits}/pass</option>`).join("")}</select></div>
       <div><label>Method</label><div class="chips"><button class="chip on" data-m="single">Single pass (collage as one product)</button><button class="chip" data-m="seq">Sequential (${items.length} passes)</button></div></div>
       <p class="hint" id="otCost"></p>
       <button class="btn" id="otGo">Generate</button><div id="otMsg" class="msg"></div>
       <div class="steps" id="otSteps"></div></div>`);
     let method = "single";
-    const refresh = () => { const c = cost($("otPreset").value); $("otCost").textContent = method === "single" ? `${c} credits · one FASHN run with all items on a white collage (experimental).` : `${c * items.length} credits · ${items.length} runs, each wearing the previous result. You can stop after any step.`; };
+    const refresh = () => { const c = pc($("otPreset").value); $("otCost").textContent = method === "single" ? `${c} credits · one FASHN run with all items on a white collage (experimental).` : `${c * items.length} credits · ${items.length} runs, each wearing the previous result. You can stop after any step.`; };
     $("sheetBody").querySelectorAll("[data-m]").forEach((c) => c.onclick = () => { method = c.dataset.m; $("sheetBody").querySelectorAll("[data-m]").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
     $("otPreset").onchange = refresh; refresh();
-    $("otSelfie").querySelectorAll(".tile").forEach((t) => t.onclick = () => { state.sel.selfie = t.dataset.id; $("otSelfie").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); });
+    $("otSelfie").querySelectorAll(".tile").forEach((t) => t.onclick = () => { who = person(t.dataset.k, t.dataset.id); $("otSelfie").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); });
     $("otGo").onclick = async () => {
-      const s = state.selfies.find((x) => x.id === state.sel.selfie); if (!s) { note("otMsg", "Pick a selfie.", true); return; }
-      const preset = $("otPreset").value, c = cost(preset);
-      const total = method === "single" ? c : c * items.length;
+      if (!who) { note("otMsg", "Pick a model.", true); return; }
+      const preset = $("otPreset").value, c = pc(preset); const total = method === "single" ? c : c * items.length;
       if (!confirmSpend(total, method === "single" ? `Single-pass outfit try-on (${items.length} items).` : `Sequential outfit try-on, ${items.length} passes.`)) return;
       $("otGo").disabled = true; $("otSteps").innerHTML = "";
+      const meta = { selfie_id: who.kind === "selfie" ? who.id : null, model_id: who.kind === "model" ? who.id : null, outfit_id: o.id };
       try {
         if (method === "single") {
           note("otMsg", "Building collage…");
           const blob = await renderLayout({ ...makeLayout(items.map((g) => g.id), "grid"), bg: "#ffffff" }, 1400);
-          const r = await runAndWait("/run", { preset, selfie_path: s.path, garment_image: await toDataUrl(blob), prompt: "wear all of these items together", meta: { kind: "outfit_single", selfie_id: s.id, outfit_id: o.id } }, (t) => note("otMsg", t));
-          $("otSteps").innerHTML = `<div class="tile"><img data-path="${esc(r.path)}" alt=""></div>`; fillImgs($("otSteps"));
-          note("otMsg", `Done — ${r.credits} credits. Saved to My Photos.`);
+          const r = await runAndWait("/run", { preset, selfie_path: who.path, garment_image: await toDataUrl(blob), prompt: "wear all of these items together", meta: { ...meta, kind: "outfit_single" } }, (t) => note("otMsg", t));
+          $("otSteps").innerHTML = `<div class="tile"><img data-path="${esc(r.path)}" alt=""></div>`; fillImgs($("otSteps")); note("otMsg", `Done — ${r.credits} credits. Saved to My Photos.`);
         } else {
-          let prev = s.path, used = 0;
+          let prev = who.path, used = 0;
           for (let i = 0; i < items.length; i++) {
-            const g = items[i];
-            note("otMsg", `Step ${i + 1}/${items.length}: ${g.name}…`);
-            const r = await runAndWait("/run", { preset, selfie_path: prev, garment_path: g.cutout_path || g.path, meta: { kind: "outfit_step", selfie_id: s.id, garment_id: g.id, outfit_id: o.id, step: i + 1 } }, (t) => note("otMsg", `Step ${i + 1}/${items.length}: ${t}`));
+            const g = items[i]; note("otMsg", `Step ${i + 1}/${items.length}: ${g.name}…`);
+            const r = await runAndWait("/run", { preset, selfie_path: prev, garment_path: g.cutout_path || g.path, meta: { ...meta, kind: "outfit_step", garment_id: g.id, step: i + 1 } }, (t) => note("otMsg", `Step ${i + 1}/${items.length}: ${t}`));
             prev = r.path; used += r.credits;
             $("otSteps").insertAdjacentHTML("beforeend", `<div class="tile"><img data-path="${esc(r.path)}" alt=""><span class="cap">${i + 1}. ${esc(g.name)}</span></div>`); fillImgs($("otSteps"));
             if (i < items.length - 1 && !confirm(`Step ${i + 1} done. Continue with "${items[i + 1].name}" (${c} more credits)?`)) break;
@@ -624,31 +773,23 @@
   const BG_SWATCHES = [["White", "#ffffff"], ["Cream", "#f6efe4"], ["Beige", "#e8dccb"], ["Blush", "#f3e3dd"], ["Sage", "#e3e9df"], ["Charcoal", "#2a2724"], ["Warm fade", "g1"], ["Cool fade", "g2"]];
   const GRADS = { g1: ["#f7efe3", "#e9d7c3"], g2: ["#eef1f5", "#d9dfe8"] };
   const PRESETS = { grid: "Grid", hero3: "Hero + 3", diagonal: "Diagonal", column: "Column", circle: "Circle" };
+  const MODES = { clothing: "Clothing only", me: "Me + outfit", model: "AI model + outfit" };
   const ratio = (size) => (size === "square" ? 1 : 1.25);
   const newId = () => crypto.randomUUID().slice(0, 8);
 
-  // Preset positions: center coordinates as fractions of width/height, width as a fraction of width.
   function presetBoxes(n, kind, size) {
     const R = ratio(size), out = [];
     if (n === 0) return out;
     if (kind === "hero3" && n >= 2) {
       out.push({ x: 0.33, y: 0.5, w: 0.56 });
-      const rest = n - 1, col = Math.min(rest, 3), w = 0.3;
+      const rest = n - 1, w = 0.3;
       for (let i = 0; i < rest; i++) { const c = Math.floor(i / 3), r = i % 3, rows = Math.min(3, rest - c * 3); out.push({ x: 0.8 - c * 0.14, y: (r + 0.5) / rows, w }); }
       return out;
     }
-    if (kind === "diagonal") {
-      const w = n <= 3 ? 0.46 : 0.38;
-      for (let i = 0; i < n; i++) { const t = n === 1 ? 0.5 : i / (n - 1); out.push({ x: 0.22 + t * 0.56, y: 0.2 + t * 0.6, w, rot: (i % 2 ? 6 : -6) }); }
-      return out;
-    }
-    if (kind === "column") {
-      const w = Math.min(0.6, 0.9 / (n * 0.55) * 0.8);
-      for (let i = 0; i < n; i++) out.push({ x: 0.5, y: (i + 0.5) / n, w: Math.min(w, 0.55) });
-      return out;
-    }
+    if (kind === "diagonal") { const w = n <= 3 ? 0.46 : 0.38; for (let i = 0; i < n; i++) { const t = n === 1 ? 0.5 : i / (n - 1); out.push({ x: 0.22 + t * 0.56, y: 0.2 + t * 0.6, w, rot: (i % 2 ? 6 : -6) }); } return out; }
+    if (kind === "column") { for (let i = 0; i < n; i++) out.push({ x: 0.5, y: (i + 0.5) / n, w: Math.min(0.55, (0.9 / (n * 0.55)) * 0.8) }); return out; }
     if (kind === "circle" && n >= 3) {
-      const center = n >= 5; const ring = center ? n - 1 : n; const w = ring >= 6 ? 0.26 : 0.3;
+      const center = n >= 5, ring = center ? n - 1 : n, w = ring >= 6 ? 0.26 : 0.3;
       if (center) out.push({ x: 0.5, y: 0.5, w: 0.34 });
       for (let i = 0; i < ring; i++) { const a = -Math.PI / 2 + (i / ring) * Math.PI * 2; out.push({ x: 0.5 + Math.cos(a) * 0.33, y: 0.5 + (Math.sin(a) * 0.33) / R, w }); }
       return out;
@@ -657,33 +798,49 @@
     for (let i = 0; i < n; i++) out.push({ x: 0.05 + ((i % cols) + 0.5) * (0.9 / cols), y: 0.05 + (Math.floor(i / cols) + 0.5) * (0.9 / rows), w });
     return out;
   }
-  function makeLayout(garmentIds, preset, size = "portrait") {
-    const boxes = presetBoxes(garmentIds.length, preset, size);
-    return { v: 2, size, bg: "#f6efe4", layers: garmentIds.map((g, i) => ({ id: newId(), kind: "item", g, x: boxes[i].x, y: boxes[i].y, w: boxes[i].w, rot: boxes[i].rot || 0 })) };
+  // Person modes: the person sits large in the middle, items ring around (or sit on the sides for a few items).
+  function aroundBoxes(n, size) {
+    const R = ratio(size), out = [];
+    if (n <= 2) { for (let i = 0; i < n; i++) out.push({ x: i === 0 ? 0.16 : 0.84, y: 0.5, w: 0.28 }); return out; }
+    const w = n >= 6 ? 0.22 : 0.26;
+    for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + (i / n) * Math.PI * 2; out.push({ x: 0.5 + Math.cos(a) * 0.36, y: 0.5 + (Math.sin(a) * 0.38) / R, w }); }
+    return out;
   }
-
+  function applyPreset(layout, kind) {
+    const items = layout.layers.filter((l) => l.kind === "item"), personL = layout.layers.find((l) => l.kind === "person");
+    if (personL) { Object.assign(personL, { x: 0.5, y: 0.52, w: layout.size === "square" ? 0.42 : 0.5, rot: 0 }); const b = aroundBoxes(items.length, layout.size); items.forEach((l, i) => Object.assign(l, b[i], { rot: 0 })); }
+    else { const b = presetBoxes(items.length, kind, layout.size); items.forEach((l, i) => Object.assign(l, { x: b[i].x, y: b[i].y, w: b[i].w, rot: b[i].rot || 0 })); }
+  }
+  function makeLayout(garmentIds, preset, size = "portrait") {
+    const layout = { v: 2, mode: "clothing", size, bg: "#f6efe4", layers: garmentIds.map((g) => ({ id: newId(), kind: "item", g, x: 0.5, y: 0.5, w: 0.3, rot: 0 })) };
+    applyPreset(layout, preset); return layout;
+  }
   function renderCollages() {
     const g = $("collageGrid");
     g.innerHTML = `<button class="tile add sq" id="addCollage">+ New collage</button>` +
-      state.collages.map((c) => `<button class="tile sq" data-id="${c.id}"><img data-path="${esc(c.preview_path || "")}" alt=""><span class="cap">${esc(c.name)}</span></button>`).join("");
+      state.collages.map((c) => `<button class="tile sq" data-id="${c.id}"><img data-path="${esc(c.preview_path || "")}" alt=""><span class="cap">${esc(c.name)}</span>${c.layout?.mode && c.layout.mode !== "clothing" ? `<span class="badge">${c.layout.mode === "me" ? "me" : "model"}</span>` : ""}</button>`).join("");
     $("addCollage").onclick = () => newCollageSheet(null);
     g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => openEditor(state.collages.find((c) => c.id === t.dataset.id)));
     fillImgs(g);
   }
   function newCollageSheet(outfit) {
-    const chosen = new Set(outfit ? outfit.items : []); let preset = "grid";
+    const chosen = new Set(outfit ? outfit.items : []); let preset = "grid", mode = "clothing";
     openSheet(`<h3>New collage</h3><div class="stack">
       <div><label>Name</label><input type="text" id="cName" placeholder="Fall outfit ideas" value="${esc(outfit?.name || "")}"></div>
-      <div><label>Pick clothing</label><div class="grid" id="cPick">${state.garments.map((g) => `<button class="tile ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first.</div>'}</div></div>
-      <div><label>Starting layout</label><div class="chips" id="cPreset">${Object.entries(PRESETS).map(([k, v]) => `<button class="chip ${k === "grid" ? "on" : ""}" data-p="${k}">${v}</button>`).join("")}</div></div>
+      <div><label>Mode</label><div class="chips" id="cMode">${Object.entries(MODES).map(([k, v]) => `<button class="chip ${k === "clothing" ? "on" : ""}" data-m="${k}">${v}</button>`).join("")}</div></div>
+      <div><label>Pick clothing</label><div class="grid" id="cPick">${state.garments.map((g) => `<button class="tile contain ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first.</div>'}</div></div>
+      <div id="cPresetWrap"><label>Starting layout</label><div class="chips" id="cPreset">${Object.entries(PRESETS).map(([k, v]) => `<button class="chip ${k === "grid" ? "on" : ""}" data-p="${k}">${v}</button>`).join("")}</div></div>
       <button class="btn" id="cCreate">Open editor</button><div id="cMsg" class="msg err"></div></div>`);
     $("cPick").querySelectorAll(".tile").forEach((t) => t.onclick = () => { chosen.has(t.dataset.id) ? chosen.delete(t.dataset.id) : chosen.add(t.dataset.id); t.classList.toggle("sel"); });
     $("cPreset").querySelectorAll(".chip").forEach((c) => c.onclick = () => { preset = c.dataset.p; $("cPreset").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); });
+    $("cMode").querySelectorAll(".chip").forEach((c) => c.onclick = () => { mode = c.dataset.m; $("cMode").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("cPresetWrap").classList.toggle("hidden", mode !== "clothing"); });
     $("cCreate").onclick = async () => {
       if (!chosen.size) { $("cMsg").textContent = "Pick at least one item."; return; }
-      const { data, error } = await sb.from("collages").insert({ name: $("cName").value.trim() || "Untitled collage", outfit_id: outfit?.id || null, layout: makeLayout([...chosen], preset) }).select("*").single();
+      const layout = makeLayout([...chosen], preset); layout.mode = mode;
+      const { data, error } = await sb.from("collages").insert({ name: $("cName").value.trim() || "Untitled collage", outfit_id: outfit?.id || null, layout }).select("*").single();
       if (error) { $("cMsg").textContent = error.message; return; }
-      closeSheet(); await loadAll(); openEditor(data);
+      closeSheet(); await loadAll(); await openEditor(data);
+      if (mode !== "clothing") pickPersonSheet();
     };
   }
 
@@ -696,21 +853,21 @@
     ed.hist = ed.hist.slice(0, ed.hi + 1); ed.hist.push(s); if (ed.hist.length > 60) ed.hist.shift(); ed.hi = ed.hist.length - 1; ed.dirty = true; updateUndo();
   }
   function updateUndo() { $("edUndo").disabled = ed.hi <= 0; $("edRedo").disabled = ed.hi >= ed.hist.length - 1; }
-  $("edUndo").onclick = () => { if (ed.hi > 0) { ed.hi--; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; draw(); updateUndo(); } };
-  $("edRedo").onclick = () => { if (ed.hi < ed.hist.length - 1) { ed.hi++; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; draw(); updateUndo(); } };
+  $("edUndo").onclick = async () => { if (ed.hi > 0) { ed.hi--; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; await preloadImgs(); draw(); updateUndo(); } };
+  $("edRedo").onclick = async () => { if (ed.hi < ed.hist.length - 1) { ed.hi++; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; await preloadImgs(); draw(); updateUndo(); } };
 
   async function openEditor(c) {
     if (!c) return;
     ed.c = c; ed.layout = c.layout && c.layout.layers ? JSON.parse(JSON.stringify(c.layout)) : makeLayout([], "grid");
-    ed.layout.size = ed.layout.size || "portrait"; ed.layout.bg = ed.layout.bg || "#f6efe4";
+    ed.layout.size = ed.layout.size || "portrait"; ed.layout.bg = ed.layout.bg || "#f6efe4"; ed.layout.mode = ed.layout.mode || "clothing";
     ed.sel = null; ed.hist = [snapshot()]; ed.hi = 0; ed.dirty = false; updateUndo();
     $("edName").value = c.name; $("edMsg").textContent = "";
     $("editor").classList.remove("hidden"); document.body.style.overflow = "hidden";
     await preloadImgs(); renderStatic(); draw();
   }
+  const layerSrc = (l) => { if (l.kind === "item") { const g = garment(l.g); return g ? (g.cutout_path || g.path) : null; } if (l.kind === "person") return l.path; return null; };
   async function preloadImgs() {
-    const ids = new Set(ed.layout.layers.filter((l) => l.kind === "item").map((l) => l.g));
-    for (const id of ids) { const g = garment(id); if (g && !ed.imgs[id]) ed.imgs[id] = await blobUrl(g.cutout_path || g.path); }
+    for (const l of ed.layout.layers) { const p = layerSrc(l); if (p && !ed.imgs[p]) ed.imgs[p] = await blobUrl(p); }
   }
   function closeEditor() {
     if (ed.dirty && !confirm("Leave without saving? Unsaved changes will be lost.")) return;
@@ -718,31 +875,58 @@
   }
   $("edClose").onclick = closeEditor;
 
+  // Switch collage mode without touching item layers (links stay attached to the items).
+  $("modeRow").querySelectorAll(".chip").forEach((c) => c.onclick = () => {
+    const m = c.dataset.mode; if (m === ed.layout.mode) return;
+    ed.layout.mode = m;
+    if (m === "clothing") { ed.layout.layers = ed.layout.layers.filter((l) => l.kind !== "person"); applyPreset(ed.layout, "grid"); pushHistory(); renderStatic(); draw(); }
+    else { renderStatic(); pickPersonSheet(); }
+  });
+  function pickPersonSheet() {
+    const wantModel = ed.layout.mode === "model";
+    const list = wantModel
+      ? [...state.models.map((m) => ({ kind: "model", row: m, l: m.name })), ...state.generations.map((g) => ({ kind: "generation", row: g, l: "Try-on result" }))]
+      : [...state.selfies.map((s) => ({ kind: "selfie", row: s, l: s.label || "My photo" })), ...state.generations.map((g) => ({ kind: "generation", row: g, l: "Try-on result" }))];
+    openSheet(`<h3>${wantModel ? "Pick the model" : "Pick a photo of you"}</h3><p class="hint">Cutouts (no background) look best in a collage. Pick one, then make a cutout if it doesn't have one yet (${cost("bgremove")} credit).</p>
+      <div class="grid">${list.map((e) => `<button class="tile" data-k="${e.kind}" data-id="${e.row.id}"><img data-path="${esc(e.row.cutout_path || e.row.thumb_path || e.row.path)}" alt="">${e.row.cutout_path ? '<span class="badge">cutout</span>' : ""}<span class="cap">${esc(e.l)}</span></button>`).join("") || '<div class="empty">Nothing here yet — generate a try-on or a model first.</div>'}</div>
+      <div class="stack" style="margin-top:10px"><button class="btn secondary" id="ppCancel">Keep clothing only</button><div id="ppMsg" class="msg"></div></div>`);
+    $("ppCancel").onclick = () => { closeSheet(); if (!ed.layout.layers.some((l) => l.kind === "person")) { ed.layout.mode = "clothing"; renderStatic(); } };
+    $("sheetBody").querySelectorAll(".tile").forEach((t) => t.onclick = async () => {
+      const p = person(t.dataset.k, t.dataset.id);
+      if (!p.cutout_path && confirmSpend(cost("bgremove"), `Make a cutout of this ${t.dataset.k === "model" ? "model" : "photo"} first? Cancel to place it with its background.`)) {
+        try { note("ppMsg", "Cutting out…"); await runAndWait("/bgremove", { target: t.dataset.k, id: p.id }, (x) => note("ppMsg", x)); await loadAll(); } catch (e) { note("ppMsg", e.message, true); return; }
+      }
+      const fresh = person(t.dataset.k, t.dataset.id);
+      ed.layout.layers = ed.layout.layers.filter((l) => l.kind !== "person");
+      ed.layout.layers.push({ id: newId(), kind: "person", src: t.dataset.k, ref: fresh.id, path: fresh.cutout_path || fresh.path, x: 0.5, y: 0.52, w: 0.5, rot: 0 });
+      applyPreset(ed.layout, "grid"); await preloadImgs(); pushHistory(); closeSheet(); renderStatic(); draw();
+    });
+  }
+
   function renderStatic() {
+    $("modeRow").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.mode === ed.layout.mode));
     $("bgRow").innerHTML = BG_SWATCHES.map(([n, v]) => `<button class="swatch ${ed.layout.bg === v ? "on" : ""}" data-bg="${v}" title="${n}" aria-label="${n}" style="background:${v.startsWith("g") ? `linear-gradient(160deg,${GRADS[v][0]},${GRADS[v][1]})` : v}"></button>`).join("") +
       `<label class="swatch" style="background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);display:grid;place-items:center;margin:0"><input type="color" id="bgCustom" value="${/^#/.test(ed.layout.bg) ? ed.layout.bg : "#ffffff"}" style="opacity:0;width:1px;height:1px"></label>`;
     $("bgRow").querySelectorAll("[data-bg]").forEach((b) => b.onclick = () => { ed.layout.bg = b.dataset.bg; pushHistory(); renderStatic(); draw(); });
     $("bgCustom").oninput = (e) => { ed.layout.bg = e.target.value; draw(); };
     $("bgCustom").onchange = () => { pushHistory(); renderStatic(); };
     $("sizeRow").querySelectorAll(".chip").forEach((c) => { c.classList.toggle("on", c.dataset.size === ed.layout.size); c.onclick = () => { ed.layout.size = c.dataset.size; pushHistory(); renderStatic(); draw(); }; });
-    $("presetRow").innerHTML = Object.entries(PRESETS).map(([k, v]) => `<button class="chip" data-p="${k}">${v}</button>`).join("");
-    $("presetRow").querySelectorAll(".chip").forEach((c) => c.onclick = () => {
-      const items = ed.layout.layers.filter((l) => l.kind === "item"); const boxes = presetBoxes(items.length, c.dataset.p, ed.layout.size);
-      items.forEach((l, i) => Object.assign(l, { x: boxes[i].x, y: boxes[i].y, w: boxes[i].w, rot: boxes[i].rot || 0 })); pushHistory(); draw();
-    });
-    $("addTools").innerHTML = `<button class="btn secondary small" id="addText">+ Text</button>` +
+    $("presetRow").innerHTML = (ed.layout.mode === "clothing" ? Object.entries(PRESETS) : [["around", "Around the person"]]).map(([k, v]) => `<button class="chip" data-p="${k}">${v}</button>`).join("");
+    $("presetRow").querySelectorAll(".chip").forEach((c) => c.onclick = () => { applyPreset(ed.layout, c.dataset.p); pushHistory(); draw(); });
+    $("addTools").innerHTML = `<button class="btn secondary small" id="addText">+ Text</button>` + (ed.layout.mode !== "clothing" ? `<button class="btn secondary small" id="addPerson">${ed.layout.layers.some((l) => l.kind === "person") ? "Change person" : "+ Person"}</button>` : "") +
       state.garments.map((g) => `<button class="btn secondary small" data-add="${g.id}">+ ${esc(g.name || "item")}</button>`).join("");
     $("addText").onclick = () => { const t = prompt("Text", "Shop the Look"); if (!t) return; ed.layout.layers.push({ id: newId(), kind: "text", t, x: 0.5, y: 0.08, size: 0.07, color: isDark(ed.layout.bg) ? "#f6efe4" : "#1c1915", font: "serif", weight: 600, rot: 0 }); ed.sel = ed.layout.layers.length - 1; pushHistory(); draw(); };
-    $("addTools").querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => { const g = garment(b.dataset.add); if (!ed.imgs[g.id]) ed.imgs[g.id] = await blobUrl(g.cutout_path || g.path); ed.layout.layers.push({ id: newId(), kind: "item", g: g.id, x: 0.5, y: 0.5, w: 0.4, rot: 0 }); ed.sel = ed.layout.layers.length - 1; pushHistory(); draw(); });
+    const ap = $("addPerson"); if (ap) ap.onclick = pickPersonSheet;
+    $("addTools").querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => { const g = garment(b.dataset.add); const p = g.cutout_path || g.path; if (!ed.imgs[p]) ed.imgs[p] = await blobUrl(p); ed.layout.layers.push({ id: newId(), kind: "item", g: g.id, x: 0.5, y: 0.5, w: 0.3, rot: 0 }); ed.sel = ed.layout.layers.length - 1; pushHistory(); draw(); });
     renderLinks();
   }
   function isDark(bg) { if (!/^#/.test(bg)) return false; const n = parseInt(bg.slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 110; }
+  function collageItems() { return [...new Set(ed.layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean); }
   function renderLinks() {
-    const items = [...new Set(ed.layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
+    const items = collageItems();
     $("edLinks").textContent = items.length ? items.map((g) => `${g.name}${g.brand ? " — " + g.brand : ""}: ${g.affiliate_url || "(no link yet)"}`).join("\n") : "No items yet.";
-    $("edCopyLinks").onclick = async () => { try { await navigator.clipboard.writeText(linksText($("edName").value, "", items)); note("edMsg", "Links copied."); } catch { note("edMsg", "Copy failed — select the text above.", true); } };
+    $("edCopyLinks").onclick = () => copyText(linksText($("edName").value, "", items), "edMsg");
   }
-
   function stageBg(bg) { return bg.startsWith("g") ? `linear-gradient(160deg,${GRADS[bg][0]},${GRADS[bg][1]})` : bg; }
   function draw() {
     const W = stage.clientWidth, H = Math.round(W * ratio(ed.layout.size));
@@ -750,14 +934,14 @@
     stage.querySelectorAll(".layer").forEach((e) => e.remove());
     ed.layout.layers.forEach((l, i) => {
       const el = document.createElement("div"); el.className = "layer " + (l.kind === "text" ? "text" : "") + (ed.sel === i ? " sel" : ""); el.dataset.i = i;
-      if (l.kind === "item") { const im = document.createElement("img"); im.src = ed.imgs[l.g] || ""; im.alt = ""; el.appendChild(im); }
-      else { el.textContent = l.t; el.style.color = l.color; el.style.fontFamily = l.font === "serif" ? "Fraunces, serif" : '"Inter Tight", sans-serif'; el.style.fontWeight = l.weight || 600; el.style.fontSize = l.size * W + "px"; }
+      if (l.kind === "text") { el.textContent = l.t; el.style.color = l.color; el.style.fontFamily = l.font === "serif" ? "Fraunces, serif" : '"Inter Tight", sans-serif'; el.style.fontWeight = l.weight || 600; el.style.fontSize = l.size * W + "px"; }
+      else { const im = document.createElement("img"); im.src = ed.imgs[layerSrc(l)] || ""; im.alt = ""; el.appendChild(im); }
       place(el, l, W, H); el.style.zIndex = i + 1; attachGestures(el, i); stage.appendChild(el);
     });
     renderSelTools(); renderLinks();
   }
   function place(el, l, W, H) {
-    if (l.kind === "item") el.style.width = l.w * W + "px";
+    if (l.kind !== "text") el.style.width = l.w * W + "px";
     el.style.transform = `translate(${l.x * W}px, ${l.y * H}px) translate(-50%,-50%) rotate(${l.rot || 0}deg)`;
   }
   function attachGestures(el, i) {
@@ -778,9 +962,8 @@
       } else {
         const [a0, b0] = S, [a1, b1] = P;
         const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y) || 1, d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
-        const ang = (Math.atan2(b1.y - a1.y, b1.x - a1.x) - Math.atan2(b0.y - a0.y, b0.x - a0.x)) * 180 / Math.PI;
-        const scale = d1 / d0;
-        if (l.kind === "item") l.w = Math.min(1.6, Math.max(0.08, start.w * scale)); else l.size = Math.min(0.3, Math.max(0.02, start.size * scale));
+        const ang = (Math.atan2(b1.y - a1.y, b1.x - a1.x) - Math.atan2(b0.y - a0.y, b0.x - a0.x)) * 180 / Math.PI, scale = d1 / d0;
+        if (l.kind !== "text") l.w = Math.min(1.6, Math.max(0.08, start.w * scale)); else l.size = Math.min(0.3, Math.max(0.02, start.size * scale));
         l.rot = Math.round(((start.rot || 0) + ang) * 10) / 10;
         const m0 = { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 }, m1 = { x: (a1.x + b1.x) / 2, y: (a1.y + b1.y) / 2 };
         l.x = start.x + (m1.x - m0.x) / W(); l.y = start.y + (m1.y - m0.y) / H();
@@ -792,13 +975,12 @@
     el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
   }
   stage.addEventListener("pointerdown", (e) => { if (e.target === stage) { ed.sel = null; stage.querySelectorAll(".layer").forEach((x) => x.classList.remove("sel")); renderSelTools(); } });
-
   function renderSelTools() {
     const t = $("selTools"); const l = ed.sel != null ? ed.layout.layers[ed.sel] : null;
-    if (!l) { t.innerHTML = `<span class="kv" style="padding:8px 2px">Tap an item to move · drag · pinch to resize & rotate</span>`; return; }
+    if (!l) { t.innerHTML = `<span class="kv" style="padding:8px 2px">Tap a layer to move it · drag · pinch to resize & rotate</span>`; return; }
     const common = `<button class="btn secondary small" data-a="smaller">− Size</button><button class="btn secondary small" data-a="bigger">+ Size</button>
       <button class="btn secondary small" data-a="rotl">⟲ 15°</button><button class="btn secondary small" data-a="rotr">⟳ 15°</button><button class="btn secondary small" data-a="straight">Straighten</button>
-      <button class="btn secondary small" data-a="front">Front</button><button class="btn secondary small" data-a="back">Back</button><button class="btn secondary small" data-a="dup">Duplicate</button>`;
+      <button class="btn secondary small" data-a="front">Front</button><button class="btn secondary small" data-a="back">Back</button>${l.kind !== "person" ? '<button class="btn secondary small" data-a="dup">Duplicate</button>' : ""}`;
     const text = l.kind === "text" ? `<button class="btn secondary small" data-a="edit">Edit text</button><button class="btn secondary small" data-a="font">${l.font === "serif" ? "Sans" : "Serif"}</button>
       <label class="btn secondary small" style="margin:0">Color<input type="color" id="txtColor" value="${l.color}" style="width:22px;height:22px;border:0;background:none;padding:0"></label>` : "";
     t.innerHTML = common + text + `<button class="btn danger small" data-a="remove">Remove</button>`;
@@ -807,21 +989,19 @@
   }
   function action(a) {
     const i = ed.sel; if (i == null) return; const l = ed.layout.layers[i]; const L = ed.layout.layers;
-    const scale = (f) => { if (l.kind === "item") l.w = Math.min(1.6, Math.max(0.08, l.w * f)); else l.size = Math.min(0.3, Math.max(0.02, l.size * f)); };
+    const scale = (f) => { if (l.kind !== "text") l.w = Math.min(1.6, Math.max(0.08, l.w * f)); else l.size = Math.min(0.3, Math.max(0.02, l.size * f)); };
     switch (a) {
       case "smaller": scale(0.88); break; case "bigger": scale(1.14); break;
       case "rotl": l.rot = (l.rot || 0) - 15; break; case "rotr": l.rot = (l.rot || 0) + 15; break; case "straight": l.rot = 0; break;
       case "front": L.splice(i, 1); L.push(l); ed.sel = L.length - 1; break;
       case "back": L.splice(i, 1); L.unshift(l); ed.sel = 0; break;
       case "dup": L.splice(i + 1, 0, { ...l, id: newId(), x: Math.min(0.95, l.x + 0.06), y: Math.min(0.95, l.y + 0.06) }); ed.sel = i + 1; break;
-      case "remove": L.splice(i, 1); ed.sel = null; break;
+      case "remove": L.splice(i, 1); ed.sel = null; if (!L.some((x) => x.kind === "person")) ed.layout.mode = "clothing"; renderStatic(); break;
       case "edit": { const t = prompt("Text", l.t); if (t != null && t !== "") l.t = t; break; }
       case "font": l.font = l.font === "serif" ? "sans" : "serif"; break;
     }
     pushHistory(); draw();
   }
-
-  // Render a layout to a JPEG blob at width W (same math as the on-screen stage).
   async function renderLayout(layout, W) {
     const H = Math.round(W * ratio(layout.size)), c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d");
     const bg = layout.bg || "#ffffff";
@@ -830,14 +1010,13 @@
     try { await document.fonts.load('600 40px Fraunces'); await document.fonts.load('600 40px "Inter Tight"'); } catch {}
     for (const l of layout.layers) {
       ctx.save(); ctx.translate(l.x * W, l.y * H); ctx.rotate(((l.rot || 0) * Math.PI) / 180);
-      if (l.kind === "item") {
-        const g = garment(l.g); if (!g) { ctx.restore(); continue; }
-        const img = await loadImg(await blobUrl(g.cutout_path || g.path));
-        const w = l.w * W, h = (w * img.height) / img.width; ctx.drawImage(img, -w / 2, -h / 2, w, h);
-      } else {
+      if (l.kind === "text") {
         const px = l.size * W; ctx.font = `${l.weight || 600} ${px}px ${l.font === "serif" ? "Fraunces, serif" : '"Inter Tight", sans-serif'}`;
         ctx.fillStyle = l.color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         const lines = String(l.t).split("\n"); lines.forEach((ln, k) => ctx.fillText(ln, 0, (k - (lines.length - 1) / 2) * px * 1.15));
+      } else {
+        const p = layerSrc(l); if (!p) { ctx.restore(); continue; }
+        const img = await loadImg(await blobUrl(p)); const w = l.w * W, h = (w * img.height) / img.width; ctx.drawImage(img, -w / 2, -h / 2, w, h);
       }
       ctx.restore();
     }
@@ -860,16 +1039,14 @@
 
   // ================================================================== CAPTIONS (free, from your item metadata)
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-  function captionCtx() {
-    const items = [...new Set(ed.layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
-    return { title: $("edName").value.trim() || "This outfit", items, s: state.settings };
-  }
+  function captionCtx() { return { title: $("edName").value.trim() || "This outfit", items: collageItems(), s: state.settings, mode: ed.layout.mode }; }
   function genCaption(platform, tone, ctx) {
     const { title, items, s } = ctx; const names = items.map((g) => g.name).filter(Boolean);
     const list = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names.at(-1) : names[0] || "these pieces";
     const brands = [...new Set(items.map((g) => g.brand).filter(Boolean))];
+    const me = ctx.mode === "me" ? " (yes, that's me in it)" : "";
     const hooks = {
-      casual: [`${title} — all from Amazon.`, `Okay, this one's easy: ${title.toLowerCase()}.`, `Throwing this together felt effortless.`, `Weekend-ready and everything's on Amazon.`],
+      casual: [`${title} — all from Amazon.`, `Okay, this one's easy: ${title.toLowerCase()}.`, `Throwing this together felt effortless${me}.`, `Weekend-ready and everything's on Amazon.`],
       polished: [`${title}: a considered edit of pieces that work together.`, `A clean, wearable look — ${title.toLowerCase()}.`, `Styled with intention: ${title.toLowerCase()}.`],
       playful: [`POV: you found the outfit and it's all one click away 🛒`, `${title} but make it Amazon ✨`, `Say less — ${title.toLowerCase()} is here.`, `Add to cart energy only.`],
     };
@@ -888,24 +1065,20 @@
   // ================================================================== SHARE / PUBLISH
   const shopOf = (collageId) => state.shops.find((p) => p.collage_id === collageId);
   const shopLink = (sp) => SHOP_BASE + sp.slug;
-  const publicUrl = (path) => `${SUPABASE_URL}/storage/v1/object/public/shop/${path}`;
   async function uploadPublic(path, blob) { const { error } = await sb.storage.from("shop").upload(path, blob, { contentType: blob.type, upsert: true }); if (error) throw new Error(error.message); }
   async function publishShop(caption) {
     const ctx = captionCtx(); let sp = shopOf(ed.c.id);
-    const slug = sp?.slug || Math.random().toString(36).slice(2, 12);
-    const base = `${state.uid}/${slug}`;
-    const collage = await renderLayout(ed.layout, 1080); await uploadPublic(`${base}/collage.jpg`, collage);
+    const slug = sp?.slug || Math.random().toString(36).slice(2, 12), base = `${state.uid}/${slug}`;
+    await uploadPublic(`${base}/collage.jpg`, await renderLayout(ed.layout, 1080));
     const items = [];
     for (const g of ctx.items) {
       let image_path = null;
       const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
-      if (src) { const blob = await shrink(await blobOf(src), 700, src.endsWith(".png") ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${src.endsWith(".png") ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
+      if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
       items.push({ name: g.name, brand: g.brand || "", url: g.affiliate_url || "", image_path });
     }
-    const row = { collage_id: ed.c.id, slug, title: ctx.title, caption: caption || null, disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(),
-      collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString() };
-    const q = sp ? sb.from("shop_pages").update(row).eq("id", sp.id) : sb.from("shop_pages").insert(row);
-    const { error } = await q; if (error) throw new Error(error.message);
+    const row = { collage_id: ed.c.id, slug, title: ctx.title, caption: caption || null, disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString() };
+    const { error } = await (sp ? sb.from("shop_pages").update(row).eq("id", sp.id) : sb.from("shop_pages").insert(row)); if (error) throw new Error(error.message);
     await loadAll(); return shopOf(ed.c.id);
   }
   async function unpublishShop(sp) {
@@ -915,10 +1088,7 @@
     await loadAll();
   }
   async function copyText(t, msgId) { try { await navigator.clipboard.writeText(t); note(msgId, "Copied."); } catch { note(msgId, "Copy failed — select the text and copy manually.", true); } }
-
-  $("edShare").onclick = () => {
-    if (ed.dirty) { if (!confirm("Save the collage first?")) return; $("edSave").onclick().then(shareSheet); } else shareSheet();
-  };
+  $("edShare").onclick = async () => { if (ed.dirty) { if (!confirm("Save the collage first?")) return; await $("edSave").onclick(); } shareSheet(); };
   function shareSheet() {
     const ctx = captionCtx(); let platform = "instagram", tone = "casual"; const sp = shopOf(ed.c.id);
     const missing = ctx.items.filter((g) => !g.affiliate_url).length;
@@ -973,8 +1143,7 @@
 
   // ------------------------------------------------------------------ account (header tap)
   $("title").addEventListener("click", () => {
-    if (!state.me) return;
-    const s = state.settings;
+    if (!state.me) return; const s = state.settings;
     openSheet(`<h3>Account</h3><div class="stack"><p class="kv">${esc(state.me.email)} · limit ${state.me.daily_cap} credits/day (${esc(state.me.tz || "")})</p>
       <h3>Amazon & captions</h3>
       <div><label>Amazon Associates tracking ID</label><input type="text" id="setTag" value="${esc(s.amazon_tag)}" placeholder="yourname-20" autocapitalize="none"></div>
