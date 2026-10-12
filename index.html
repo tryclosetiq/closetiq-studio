@@ -81,12 +81,14 @@
   @media (prefers-reduced-motion:no-preference){.spinner{animation:spin .9s linear infinite}}
   @keyframes spin{to{transform:rotate(360deg)}}
   .steps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-  /* ---- crop tool ---- */
-  .cropWrap{position:relative;width:100%;background:#111;border-radius:12px;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
-  .cropWrap img{width:100%;display:block;pointer-events:none;-webkit-user-drag:none}
-  .cropBox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.55);touch-action:none}
-  .cropBox .h{position:absolute;width:28px;height:28px;right:-14px;bottom:-14px;border-radius:50%;background:var(--accent);border:2px solid #fff}
-  .cropBox .h.tl{left:-14px;top:-14px;right:auto;bottom:auto}
+  /* ---- clothing importer (full screen) + crop tool ---- */
+  #importer{position:fixed;inset:0;z-index:30;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch;padding:calc(8px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
+  .cropWrap{position:relative;display:flex;justify-content:center;align-items:center;width:100%;max-height:52dvh;background:#111;border-radius:12px;overflow:hidden;user-select:none;-webkit-user-select:none}
+  .cropWrap img{display:block;max-width:100%;max-height:52dvh;width:auto;height:auto;pointer-events:none;-webkit-user-drag:none}
+  .cropBox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.5);touch-action:none;cursor:move}
+  .cropBox .h{position:absolute;width:34px;height:34px;right:-17px;bottom:-17px;border-radius:50%;background:var(--accent);border:3px solid #fff;touch-action:none}
+  .cropBox .h.tl{left:-17px;top:-17px;right:auto;bottom:auto}
+  .cropBox .lbl{position:absolute;left:50%;top:-26px;transform:translateX(-50%);font-size:11px;color:#fff;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:999px;white-space:nowrap}
   /* ---- collage editor (full screen) ---- */
   #editor{position:fixed;inset:0;z-index:30;background:var(--bg);overflow:auto;padding:calc(8px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
   .ed-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
@@ -194,6 +196,13 @@
 
 <div class="sheet-bg" id="sheetBg"></div>
 <div class="sheet" id="sheet"><div class="handle"></div><div id="sheetBody"></div></div>
+
+<!-- Clothing importer -->
+<section id="importer" class="hidden">
+  <div class="ed-top"><button class="btn secondary small" id="iwClose">‹ Cancel</button><strong style="flex:1">Add clothing</strong></div>
+  <div id="iwBody" class="stack"></div>
+  <div class="ed-bar"><button class="btn secondary" id="iwExtract">Extract clothing</button><button class="btn" id="iwSave">Save</button></div>
+</section>
 
 <!-- Collage editor -->
 <section id="editor" class="hidden">
@@ -487,46 +496,61 @@
     } catch { return { url: input, asin: null, note: "That doesn't look like a valid URL." }; }
   }
 
-  // Import wizard: crop the product out of a screenshot → optional AI extraction with preview → details → save.
+  // Import wizard (full-screen on iPhone): frame the product → optional AI extraction with preview → details → save.
+  // The crop frame is measured against the DISPLAYED image, so the saved crop always matches what you see.
+  function closeImporter() { $("importer").classList.add("hidden"); $("iwBody").innerHTML = ""; document.body.style.overflow = ""; }
+  $("iwClose").onclick = closeImporter;
   async function importWizard(file) {
     const srcUrl = URL.createObjectURL(file); const info = await looksClean(file);
-    let crop = { x: 0, y: 0, w: 1, h: 1 }, cutout = null, cutoutPath = null, seed = 42;
-    openSheet(`<h3>Add clothing</h3><div class="stack">
-      <p class="hint" id="iwHint">${info.ratio > 1.8 ? "This looks like a screenshot. Drag the box to frame just the product you want (move it, or drag the corner handles)." : info.clean ? "This already looks like a clean product image — no AI processing needed." : "Frame the product, then clean it up if needed."}</p>
-      <div class="cropWrap" id="cropWrap"><img id="cropImg" src="${srcUrl}" alt=""><div class="cropBox" id="cropBox"><div class="h tl"></div><div class="h"></div></div></div>
+    const start = info.ratio > 1.8 ? { x: 0.08, y: 0.18, w: 0.84, h: 0.5 } : { x: 0, y: 0, w: 1, h: 1 };
+    let crop = { ...start }, cutout = null, cutoutPath = null, seed = 42;
+    $("iwBody").innerHTML = `
+      <p class="hint">${info.ratio > 1.8 ? "Looks like a screenshot. Drag the frame to move it, or drag a corner handle to resize, until only the product you want is inside." : info.clean ? "This already looks like a clean product image — no AI processing needed." : "Frame the product (drag to move, corners to resize), then clean it up if needed."}</p>
+      <div class="cropWrap" id="cropWrap"><img id="cropImg" src="${srcUrl}" alt=""><div class="cropBox" id="cropBox"><span class="lbl">Product</span><div class="h tl"></div><div class="h"></div></div></div>
       <div class="row"><button class="btn secondary small" id="iwReset">Reset frame</button><button class="btn secondary small" id="iwFull">Use whole image</button></div>
-      <div id="iwPreviewWrap" class="hidden"><label>AI result</label><img class="big contain" id="iwPreview" alt=""><div class="row" style="margin-top:8px"><button class="btn small" id="iwKeep">Keep</button><button class="btn secondary small" id="iwRetry">Retry · ${cost("extract")} credit</button><button class="btn secondary small" id="iwOrig">Use original</button></div></div>
-      <button class="btn secondary" id="iwExtract" ${info.clean ? "disabled" : ""}>Person wearing it? Extract clothing only · ${cost("extract")} credit</button>
+      <div class="card" style="margin:0"><label>Framed result</label><img class="big contain" id="iwCropPreview" alt="" style="max-height:34dvh"></div>
+      <div id="iwPreviewWrap" class="card hidden" style="margin:0"><label>AI result</label><img class="big contain" id="iwPreview" alt="" style="max-height:40dvh"><div class="row" style="margin-top:8px"><button class="btn small" id="iwKeep">Keep</button><button class="btn secondary small" id="iwRetry">Retry · ${cost("extract")} credit</button><button class="btn secondary small" id="iwOrig">Use original</button></div></div>
       ${garmentFields()}
-      <button class="btn" id="iwSave">Save to My Clothing</button><div id="iwMsg" class="msg"></div></div>`);
-    // crop box interactions
+      <div id="iwMsg" class="msg"></div>`;
+    $("iwExtract").textContent = `Extract clothing · ${cost("extract")} credit`; $("iwExtract").disabled = info.clean; $("iwSave").disabled = false; $("iwSave").textContent = "Save to My Clothing";
+    $("importer").classList.remove("hidden"); $("importer").scrollTop = 0; document.body.style.overflow = "hidden";
+
     const wrap = $("cropWrap"), box = $("cropBox"), img = $("cropImg");
-    const paint = () => { const W = wrap.clientWidth, H = wrap.clientHeight; box.style.left = crop.x * W + "px"; box.style.top = crop.y * H + "px"; box.style.width = crop.w * W + "px"; box.style.height = crop.h * H + "px"; };
-    img.onload = () => { if (info.ratio > 1.8) crop = { x: 0.08, y: 0.18, w: 0.84, h: 0.5 }; paint(); };
+    // geometry of the displayed image inside the wrapper
+    const geo = () => { const r = img.getBoundingClientRect(), w = wrap.getBoundingClientRect(); return { ox: r.left - w.left, oy: r.top - w.top, W: r.width || 1, H: r.height || 1 }; };
+    let previewTimer = null;
+    const paint = () => {
+      const g = geo(); box.style.left = g.ox + crop.x * g.W + "px"; box.style.top = g.oy + crop.y * g.H + "px"; box.style.width = crop.w * g.W + "px"; box.style.height = crop.h * g.H + "px";
+      clearTimeout(previewTimer); previewTimer = setTimeout(async () => { $("iwCropPreview").src = URL.createObjectURL(await shrink(file, 600, "image/jpeg", 0.85, crop)); }, 250);
+    };
+    img.onload = paint; if (img.complete) paint();
+    window.addEventListener("resize", paint, { once: false });
     let drag = null;
-    box.addEventListener("pointerdown", (e) => { e.preventDefault(); box.setPointerCapture(e.pointerId); const tl = e.target.classList.contains("tl"), br = e.target.classList.contains("h") && !tl; drag = { mode: br ? "br" : tl ? "tl" : "move", x: e.clientX, y: e.clientY, c: { ...crop } }; });
+    box.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); box.setPointerCapture(e.pointerId); const tl = e.target.classList.contains("tl"), br = e.target.classList.contains("h") && !tl; drag = { mode: br ? "br" : tl ? "tl" : "move", x: e.clientX, y: e.clientY, c: { ...crop } }; });
     box.addEventListener("pointermove", (e) => {
-      if (!drag) return; const W = wrap.clientWidth, H = wrap.clientHeight, dx = (e.clientX - drag.x) / W, dy = (e.clientY - drag.y) / H, c = drag.c;
+      if (!drag) return; e.preventDefault(); const g = geo(), dx = (e.clientX - drag.x) / g.W, dy = (e.clientY - drag.y) / g.H, c = drag.c;
       if (drag.mode === "move") crop = { ...c, x: Math.min(1 - c.w, Math.max(0, c.x + dx)), y: Math.min(1 - c.h, Math.max(0, c.y + dy)) };
-      else if (drag.mode === "br") crop = { ...c, w: Math.min(1 - c.x, Math.max(0.1, c.w + dx)), h: Math.min(1 - c.y, Math.max(0.1, c.h + dy)) };
-      else { const nx = Math.min(c.x + c.w - 0.1, Math.max(0, c.x + dx)), ny = Math.min(c.y + c.h - 0.1, Math.max(0, c.y + dy)); crop = { x: nx, y: ny, w: c.w + (c.x - nx), h: c.h + (c.y - ny) }; }
+      else if (drag.mode === "br") crop = { ...c, w: Math.min(1 - c.x, Math.max(0.08, c.w + dx)), h: Math.min(1 - c.y, Math.max(0.08, c.h + dy)) };
+      else { const nx = Math.min(c.x + c.w - 0.08, Math.max(0, c.x + dx)), ny = Math.min(c.y + c.h - 0.08, Math.max(0, c.y + dy)); crop = { x: nx, y: ny, w: c.w + (c.x - nx), h: c.h + (c.y - ny) }; }
       paint();
     });
     const end = () => { drag = null; }; box.addEventListener("pointerup", end); box.addEventListener("pointercancel", end);
-    $("iwReset").onclick = () => { crop = info.ratio > 1.8 ? { x: 0.08, y: 0.18, w: 0.84, h: 0.5 } : { x: 0, y: 0, w: 1, h: 1 }; paint(); };
+    $("iwReset").onclick = () => { crop = { ...start }; paint(); };
     $("iwFull").onclick = () => { crop = { x: 0, y: 0, w: 1, h: 1 }; paint(); };
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
-    const cropped = () => shrink(file, 1600, "image/jpeg", 0.9, crop);
+    const cropped = () => shrink(file, 1600, "image/jpeg", 0.9, crop);   // the framed area is what gets saved, tried on and extracted
     async function extract() {
       if (!confirmSpend(cost("extract"), "Recreate just the clothing from the framed area (FASHN Edit). You'll preview it before saving.")) return;
       try {
-        note("iwMsg", "Extracting…"); const r = await runAndWait("/extract", { image: await toDataUrl(await cropped()), seed }, (t) => note("iwMsg", t));
-        cutoutPath = r.path; cutout = await blobOf(r.path); $("iwPreview").src = URL.createObjectURL(cutout); $("iwPreviewWrap").classList.remove("hidden"); note("iwMsg", `Preview ready (${r.credits} credit). Keep it, retry with a different seed, or use the original.`);
+        $("iwExtract").disabled = true; note("iwMsg", "Extracting…"); const r = await runAndWait("/extract", { image: await toDataUrl(await cropped()), seed }, (t) => note("iwMsg", t));
+        cutoutPath = r.path; cutout = await blobOf(r.path); $("iwPreview").src = URL.createObjectURL(cutout); $("iwPreviewWrap").classList.remove("hidden"); $("iwPreviewWrap").scrollIntoView({ behavior: "smooth", block: "center" });
+        note("iwMsg", `Preview ready (${r.credits} credit). Keep it, retry with a different seed, or use the original.`);
       } catch (e) { note("iwMsg", e.message, true); }
+      $("iwExtract").disabled = false;
     }
     $("iwExtract").onclick = extract;
     $("iwRetry").onclick = () => { seed = Math.floor(Math.random() * 1e9); extract(); };
-    $("iwKeep").onclick = () => { note("iwMsg", "Cutout will be saved with this item."); $("iwKeep").classList.add("on"); };
+    $("iwKeep").onclick = () => { note("iwMsg", "Cutout will be saved with this item. Fill in the details below and tap Save."); $("iwKeep").classList.add("on"); };
     $("iwOrig").onclick = () => { cutout = null; cutoutPath = null; $("iwPreviewWrap").classList.add("hidden"); note("iwMsg", "Using the framed original."); };
     $("iwSave").onclick = async () => {
       $("iwSave").disabled = true; note("iwMsg", "Saving…");
@@ -538,7 +562,7 @@
         if (cutout) { cutout_path = base + "_x.png"; await upload(cutout_path, cutout); if (cutoutPath) removeFiles([cutoutPath]); }
         const { error } = await sb.from("garments").insert({ id, source_path: base + "_src.jpg", path: base + ".jpg", thumb_path: base + "_t.jpg", cutout_path, ...readGarmentFields() });
         if (error) throw new Error(error.message);
-        closeSheet(); await loadAll();
+        closeImporter(); await loadAll(); showTab("clothing");
       } catch (e) { note("iwMsg", e.message, true); $("iwSave").disabled = false; }
     };
   }
