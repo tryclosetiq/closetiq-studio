@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5efe6">
+<meta property="og:title" content="Shop this outfit · ClosetIQ Studio">
+<meta property="og:description" content="Every piece in this look, with links.">
+<meta property="og:type" content="website">
+<title>Shop This Outfit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter+Tight:wght@400;500;600&display=swap">
+<style>
+  :root{--bg:#f5efe6;--card:#fffcf7;--ink:#1c1915;--muted:#70675c;--line:#e5dbcc;--soft:#efe6d9;--accent:#a8894f;--accent-ink:#fffaf0}
+  @media (prefers-color-scheme: dark){:root:not([data-theme=light]){--bg:#15120e;--card:#1f1a14;--ink:#f3ede4;--muted:#a79d90;--line:#352e26;--soft:#2a241c;--accent:#cfb27a;--accent-ink:#1c1915}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Inter Tight",system-ui,sans-serif}
+  .wrap{max-width:520px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom))}
+  .brand{font:600 14px/1 Fraunces,serif;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin:0 0 10px}
+  h1{font:600 30px/1.1 Fraunces,serif;margin:0 0 6px;text-wrap:balance}
+  .cap{color:var(--muted);white-space:pre-wrap;margin:0 0 16px;font-size:15px}
+  .hero{width:100%;border-radius:16px;display:block;background:var(--soft);margin-bottom:18px}
+  .disc{font-size:13px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 16px}
+  .item{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:10px}
+  .item .img{flex:0 0 84px;width:84px;height:104px;border-radius:10px;background:var(--soft);display:grid;place-items:center;overflow:hidden;color:var(--muted);font-size:11px}
+  .item img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+  .item .t{flex:1;min-width:0}
+  .item .n{font-weight:600;margin:0 0 2px}
+  .item .b{color:var(--muted);font-size:13px;margin:0 0 8px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:600;text-decoration:none;font-size:14px}
+  .btn[aria-disabled=true]{opacity:.5;pointer-events:none}
+  .foot{color:var(--muted);font-size:12px;text-align:center;margin-top:22px}
+  .empty{text-align:center;color:var(--muted);padding:60px 0}
+</style>
+</head>
+<body>
+<div class="wrap" id="page"><div class="empty">Loading…</div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+(async () => {
+  // Public page: reads ONLY published snapshots via the anon key (RLS: published = true). No login, no private data.
+  const SUPABASE_URL = "https://yjjdzugecimjwgwtkwyw.supabase.co";
+  const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqamR6dWdlY2ltandnd3Rrd3l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NjU5ODUsImV4cCI6MjEwNzM0MTk4NX0.Q0Is204-0M28vMwA9TGW8UJz_R4SJRNAmVunxSCyXko";
+  const sb = supabase.createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
+  const pub = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const page = document.getElementById("page");
+  const slug = new URLSearchParams(location.search).get("o") || "";
+  const { data: p } = slug ? await sb.from("shop_pages").select("title,caption,disclosure,collage_public_path,items,updated_at").eq("slug", slug).eq("published", true).maybeSingle() : { data: null };
+  if (!p) { page.innerHTML = '<div class="empty"><p class="brand">ClosetIQ Studio</p>This outfit is no longer available.</div>'; return; }
+  document.title = p.title + " · Shop This Outfit";
+  const ok = (u) => /^https:\/\/([a-z0-9-]+\.)*(amazon\.[a-z.]+|amzn\.(to|com|eu|asia|in)|a\.co)\//i.test(u || "");
+  page.innerHTML = `<p class="brand">Shop this outfit</p><h1>${esc(p.title)}</h1>${p.caption ? `<p class="cap">${esc(p.caption)}</p>` : ""}
+    ${p.collage_public_path ? `<img class="hero" src="${pub(p.collage_public_path)}" alt="${esc(p.title)}">` : ""}
+    <p class="disc">${esc(p.disclosure)}</p>
+    ${(p.items || []).map((it) => `<div class="item">
+      <div class="img">${it.image_path ? `<img src="${pub(it.image_path)}" alt="${esc(it.name)}" loading="lazy">` : "No photo"}</div>
+      <div class="t"><p class="n">${esc(it.name)}</p>${it.brand ? `<p class="b">${esc(it.brand)}</p>` : ""}
+        <a class="btn" href="${ok(it.url) ? esc(it.url) : "#"}" ${ok(it.url) ? 'target="_blank" rel="noopener sponsored"' : 'aria-disabled="true"'}>${ok(it.url) ? "Shop on Amazon" : "Link coming soon"}</a></div></div>`).join("")}
+    <p class="foot">Prices and availability are shown on Amazon. Updated ${esc(new Date(p.updated_at).toLocaleDateString())}.</p>`;
+})();
+</script>
+</body>
+</html>
