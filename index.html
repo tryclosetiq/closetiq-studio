@@ -78,6 +78,8 @@
   .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
   .swatch{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);padding:0;cursor:pointer;flex:0 0 auto}
   .swatch.on{border-color:var(--ring);box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--ring)}
+  .bgthumb{background-size:100% 100%;background-color:#fff}
+  .strip .bgthumb{flex:0 0 84px}
   .kv{font-size:13px;color:var(--muted)}
   .links a{color:var(--accent);word-break:break-all}
   .hidden{display:none !important}
@@ -173,7 +175,7 @@
 
   <section id="tab-discover" class="hidden">
     <h2>Discover</h2>
-    <p class="hint">Describe what you want; Studio searches Amazon for real products and styles coordinated outfits.</p>
+    <p class="hint">Describe what you want — style, colors, occasion, budget, must-have pieces. The AI stylist creates 3 complete outfit ideas; when your Amazon account is eligible, it fills them with real products automatically.</p>
     <div class="card stack">
       <textarea id="dvPrompt" placeholder="e.g. Create 5 trendy fall outfits under $100 each, women's, casual weekend"></textarea>
       <div class="chips" id="dvExamples"><button class="chip">5 trendy fall outfits under $100 each</button><button class="chip">3 office looks under $150, neutral palette</button><button class="chip">4 date-night outfits, black and red, under $120</button></div>
@@ -236,6 +238,7 @@
   <div class="tools" id="addTools"></div>
   <details class="ed" open><summary>Background & size</summary>
     <div class="row" style="flex-wrap:wrap;gap:8px" id="bgRow"></div>
+    <div id="designRow"></div>
     <div class="chips" style="margin-top:8px" id="sizeRow"><button class="chip" data-size="portrait">4:5 portrait</button><button class="chip" data-size="square">1:1 square</button></div>
   </details>
   <details class="ed"><summary>Preset layouts</summary><div class="chips" id="presetRow"></div></details>
@@ -246,6 +249,79 @@
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// Decorative collage backgrounds — original procedural SVG, no external assets.
+// Each design renders at any W×H with normalized placement, so the on-screen stage, the saved
+// preview and the full-size export all match. Palettes are muted so clothing stays the focus.
+// (This file is inlined into index.html; it is kept here for review and for the preview page.)
+const BG_DESIGNS = (() => {
+  const rnd = (seed) => { let s = seed; return () => { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; }; };
+  const px = (v) => Math.round(v * 100) / 100;
+  // tiny motif library (all paths drawn around 0,0 in a ~100-unit box, scaled by `s`)
+  const maple = (x, y, s, rot, fill, op) => `<path transform="translate(${px(x)} ${px(y)}) rotate(${rot}) scale(${px(s / 100)})" fill="${fill}" opacity="${op}" d="M0,-48 L10,-24 L28,-34 L22,-10 L48,-6 L26,8 L36,30 L12,20 L0,46 L-12,20 L-36,30 L-26,8 L-48,-6 L-22,-10 L-28,-34 L-10,-24 Z"/>`;
+  const leaf = (x, y, s, rot, fill, op) => `<path transform="translate(${px(x)} ${px(y)}) rotate(${rot}) scale(${px(s / 100)})" fill="${fill}" opacity="${op}" d="M0,-50 C30,-30 30,20 0,50 C-30,20 -30,-30 0,-50 Z M0,-40 L0,40" stroke="${fill}" stroke-width="2"/>`;
+  const flake = (x, y, s, stroke, op) => { let d = ""; for (let i = 0; i < 6; i++) { const a = (i * 60 * Math.PI) / 180, c = Math.cos(a), si = Math.sin(a); d += `M0,0 L${px(50 * c)},${px(50 * si)} M${px(30 * c)},${px(30 * si)} L${px(30 * c + 12 * Math.cos(a + 0.6))},${px(30 * si + 12 * Math.sin(a + 0.6))} M${px(30 * c)},${px(30 * si)} L${px(30 * c + 12 * Math.cos(a - 0.6))},${px(30 * si + 12 * Math.sin(a - 0.6))} `; } return `<path transform="translate(${px(x)} ${px(y)}) scale(${px(s / 100)})" d="${d}" stroke="${stroke}" stroke-width="3" stroke-linecap="round" fill="none" opacity="${op}"/>`; };
+  const bow = (x, y, s, rot, fill, op) => `<g transform="translate(${px(x)} ${px(y)}) rotate(${rot}) scale(${px(s / 100)})" fill="${fill}" opacity="${op}"><path d="M0,0 C-20,-40 -60,-40 -55,-5 C-60,25 -20,30 0,0 Z"/><path d="M0,0 C20,-40 60,-40 55,-5 C60,25 20,30 0,0 Z"/><path d="M0,0 L-18,55 L-6,52 L0,20 L6,52 L18,55 Z"/><circle r="8"/></g>`;
+  const flower = (x, y, s, petal, center, op, n = 5) => { let p = ""; for (let i = 0; i < n; i++) p += `<ellipse transform="rotate(${(360 / n) * i})" cx="0" cy="-22" rx="11" ry="20" fill="${petal}"/>`; return `<g transform="translate(${px(x)} ${px(y)}) scale(${px(s / 100)})" opacity="${op}">${p}<circle r="9" fill="${center}"/></g>`; };
+  const daisy = (x, y, s, op) => flower(x, y, s, "#ffffff", "#f3c64b", op, 8);
+  const sprig = (x, y, s, rot, stroke, op) => { let n = ""; for (let i = -40; i <= 40; i += 10) n += `<path d="M0,${i} L${i < 0 ? -14 : 14},${i - 10}" /><path d="M0,${i} L${i < 0 ? 14 : -14},${i - 10}" />`; return `<g transform="translate(${px(x)} ${px(y)}) rotate(${rot}) scale(${px(s / 100)})" stroke="${stroke}" stroke-width="3" stroke-linecap="round" fill="none" opacity="${op}"><path d="M0,-50 L0,50"/>${n}</g>`; };
+  const berries = (x, y, s, fill, op) => `<g transform="translate(${px(x)} ${px(y)}) scale(${px(s / 100)})" fill="${fill}" opacity="${op}"><circle cx="-14" cy="0" r="10"/><circle cx="10" cy="-8" r="10"/><circle cx="4" cy="14" r="10"/></g>`;
+  const star = (x, y, s, fill, op) => `<path transform="translate(${px(x)} ${px(y)}) scale(${px(s / 100)})" fill="${fill}" opacity="${op}" d="M0,-50 L14,-14 L50,-14 L22,8 L32,45 L0,24 L-32,45 L-22,8 L-50,-14 L-14,-14 Z"/>`;
+  const wrap = (W, H, body, defs = "") => `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${defs}</defs>${body}</svg>`;
+  const grad = (id, a, b, angle = 160) => { const r = (angle * Math.PI) / 180; return `<linearGradient id="${id}" x1="${px(50 - 50 * Math.cos(r))}%" y1="${px(50 - 50 * Math.sin(r))}%" x2="${px(50 + 50 * Math.cos(r))}%" y2="${px(50 + 50 * Math.sin(r))}%"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`; };
+  const vignette = (W, H, color, op) => `<radialGradient id="vig" cx="50%" cy="45%" r="70%"><stop offset="0.6" stop-color="${color}" stop-opacity="0"/><stop offset="1" stop-color="${color}" stop-opacity="${op}"/></radialGradient>`;
+  const edgeScatter = (W, H, seed, n, draw) => { const r = rnd(seed); let out = ""; for (let i = 0; i < n; i++) { const t = r(); const side = Math.floor(r() * 4); let x, y; const m = 0.16; if (side === 0) { x = r() * W; y = r() * H * m; } else if (side === 1) { x = r() * W; y = H - r() * H * m; } else if (side === 2) { x = r() * W * m; y = r() * H; } else { x = W - r() * W * m; y = r() * H; } out += draw(x, y, r, i); } return out; };
+  const paper = (W, H, color, op) => `<pattern id="paper" width="${W / 18}" height="${W / 18}" patternUnits="userSpaceOnUse"><path d="M0 ${W / 36} H${W / 18} M${W / 36} 0 V${W / 18}" stroke="${color}" stroke-width="0.6" opacity="${op}"/></pattern><rect width="${W}" height="${H}" fill="url(#paper)"/>`;
+  const S = (W) => W / 1080; // scale factor relative to a 1080-wide canvas
+
+  const designs = {
+    fall_maple: { name: "Maple leaves", group: "Fall", dark: false, svg: (W, H) => wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="url(#g)"/>` +
+      edgeScatter(W, H, 11, 26, (x, y, r, i) => maple(x, y, (60 + r() * 70) * S(W), r() * 360, ["#b4552d", "#d08a2f", "#8c3b2a", "#e2a94f"][i % 4], 0.28 + r() * 0.25)) +
+      `<rect width="${W}" height="${H}" fill="url(#vig)"/>`, grad("g", "#fbf3e6", "#f1dcc0") + vignette(W, H, "#b4552d", 0.12)) },
+    fall_plaid: { name: "Cozy plaid", group: "Fall", dark: false, svg: (W, H) => { const u = W / 9; return wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="#f4e9da"/>` +
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `<rect x="${i * u}" y="0" width="${u * 0.42}" height="${H}" fill="#b98a5a" opacity="0.14"/><rect x="0" y="${i * u}" width="${W}" height="${u * 0.42}" fill="#8e5a3a" opacity="0.12"/><rect x="${i * u + u * 0.62}" y="0" width="${u * 0.08}" height="${H}" fill="#7a3b2a" opacity="0.18"/><rect x="0" y="${i * u + u * 0.62}" width="${W}" height="${u * 0.08}" fill="#7a3b2a" opacity="0.18"/>`).join("") +
+      `<rect x="${W * 0.04}" y="${W * 0.04}" width="${W * 0.92}" height="${H - W * 0.08}" fill="#fbf6ee" opacity="0.86" rx="${W * 0.02}"/>`); } },
+    fall_harvest: { name: "Harvest branches", group: "Fall", dark: false, svg: (W, H) => wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="url(#g)"/>` +
+      [[0.06, 0.08, -35], [0.94, 0.1, 30], [0.08, 0.92, -150], [0.92, 0.9, 150]].map(([x, y, rot]) => sprig(x * W, y * H, 150 * S(W), rot, "#8a6b3d", 0.42) + berries(x * W + (x < 0.5 ? 40 : -40) * S(W), y * H + (y < 0.5 ? 50 : -50) * S(W), 60 * S(W), "#a63d2f", 0.5)).join("") +
+      edgeScatter(W, H, 7, 12, (x, y, r) => leaf(x, y, (40 + r() * 40) * S(W), r() * 360, "#c48b3c", 0.25)) +
+      paper(W, H, "#8a6b3d", 0.08), grad("g", "#f9efdf", "#efd9b8", 120)) },
+    winter_snow: { name: "Snowfall", group: "Winter", dark: false, svg: (W, H) => { const r = rnd(21); let b = ""; for (let i = 0; i < 40; i++) b += `<circle cx="${px(r() * W)}" cy="${px(r() * H)}" r="${px((6 + r() * 26) * S(W))}" fill="#ffffff" opacity="${px(0.25 + r() * 0.4)}"/>`; return wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="url(#g)"/>` + b +
+      edgeScatter(W, H, 22, 18, (x, y, rr) => flake(x, y, (40 + rr() * 60) * S(W), "#9fb8d4", 0.5 + rr() * 0.3)), grad("g", "#f6f9fd", "#dbe7f3", 150)); } },
+    winter_bows: { name: "Red bows & holly", group: "Winter", dark: false, svg: (W, H) => wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="url(#g)"/>` +
+      [[0.08, 0.07, -20], [0.92, 0.07, 20], [0.1, 0.93, 200], [0.9, 0.93, 160]].map(([x, y, rot]) => bow(x * W, y * H, 95 * S(W), rot, "#b22f3b", 0.9)).join("") +
+      edgeScatter(W, H, 5, 14, (x, y, r) => leaf(x, y, (36 + r() * 30) * S(W), r() * 360, "#3f6b4a", 0.55) + berries(x + 20 * S(W), y + 18 * S(W), 26 * S(W), "#c0392b", 0.8)) +
+      paper(W, H, "#b22f3b", 0.06), grad("g", "#fdf8f3", "#f3e6df", 140)) },
+    winter_pine: { name: "Pine & gold stars", group: "Winter", dark: false, svg: (W, H) => wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="url(#g)"/>` +
+      [[0.05, 0.12, -40], [0.95, 0.14, 40], [0.06, 0.88, -140], [0.94, 0.86, 140], [0.5, 0.02, 90], [0.5, 0.98, 90]].map(([x, y, rot]) => sprig(x * W, y * H, 170 * S(W), rot, "#466b55", 0.5)).join("") +
+      edgeScatter(W, H, 9, 16, (x, y, r) => star(x, y, (18 + r() * 26) * S(W), "#c9a24a", 0.6 + r() * 0.3)), grad("g", "#f3f6f1", "#dfe9e0", 160)) },
+    spring_blossom: { name: "Cherry blossom", group: "Spring", dark: false, svg: (W, H) => { const r = rnd(31); let branch = ""; for (const [x1, y1, x2, y2] of [[0, 0.06, 0.42, 0.2], [1, 0.08, 0.6, 0.24], [0, 0.95, 0.4, 0.8], [1, 0.92, 0.62, 0.78]]) { branch += `<path d="M${px(x1 * W)},${px(y1 * H)} Q${px((x1 + x2) / 2 * W)},${px((y1 + y2) / 2 * H - 40 * S(W))} ${px(x2 * W)},${px(y2 * H)}" stroke="#7a5a48" stroke-width="${px(5 * S(W))}" fill="none" opacity="0.6"/>`; for (let i = 0; i < 7; i++) { const t = 0.15 + r() * 0.85, x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t; branch += flower(x * W + (r() - 0.5) * 60 * S(W), y * H + (r() - 0.5) * 60 * S(W), (34 + r() * 30) * S(W), "#f6b9c6", "#e26f8c", 0.9); } } return wrap(W, H, `<rect width="${W}" height="${H}" fill="url(#g)"/>` + branch, grad("g", "#fff7f4", "#fbe4e4", 150)); } },
+    spring_wildflower: { name: "Daisy meadow", group: "Spring", dark: false, svg: (W, H) => wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="url(#g)"/>` +
+      edgeScatter(W, H, 41, 22, (x, y, r) => daisy(x, y, (28 + r() * 34) * S(W), 0.9) + leaf(x + 26 * S(W), y + 22 * S(W), (22 + r() * 16) * S(W), r() * 360, "#8fb98a", 0.6)) +
+      paper(W, H, "#8fb98a", 0.08), grad("g", "#f6fbf4", "#e5f0e2", 130)) },
+    summer_sun: { name: "Golden hour", group: "Summer", dark: false, svg: (W, H) => { let rays = ""; for (let i = 0; i < 24; i++) rays += `<path transform="translate(${px(W * 0.82)} ${px(H * 0.16)}) rotate(${i * 15})" d="M0,0 L${px(W * 0.02)},${px(W * 0.5)} L${px(-W * 0.02)},${px(W * 0.5)} Z" fill="#f6c76b" opacity="0.12"/>`; return wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="url(#g)"/>` + rays + `<circle cx="${px(W * 0.82)}" cy="${px(H * 0.16)}" r="${px(W * 0.11)}" fill="#f8d27a" opacity="0.55"/>` +
+      `<path d="M0,${px(H * 0.93)} Q${px(W * 0.25)},${px(H * 0.89)} ${px(W * 0.5)},${px(H * 0.93)} T${px(W)},${px(H * 0.93)} V${H} H0 Z" fill="#8ec5d6" opacity="0.5"/><path d="M0,${px(H * 0.96)} Q${px(W * 0.25)},${px(H * 0.93)} ${px(W * 0.5)},${px(H * 0.96)} T${px(W)},${px(H * 0.96)} V${H} H0 Z" fill="#5ea3bd" opacity="0.5"/>`, grad("g", "#fff6e8", "#fde1c4", 200)); } },
+    summer_stripe: { name: "Cabana stripes", group: "Summer", dark: false, svg: (W, H) => { const n = 14, u = W / n; let s = ""; for (let i = 0; i < n; i += 2) s += `<rect x="${px(i * u)}" y="0" width="${px(u)}" height="${H}" fill="#f08a7e" opacity="0.28"/>`; return wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="#fff9f3"/>` + s + `<rect x="${W * 0.05}" y="${W * 0.05}" width="${W * 0.9}" height="${H - W * 0.1}" fill="#fffdf9" opacity="0.9" rx="${W * 0.015}"/>` +
+      `<circle cx="${px(W * 0.09)}" cy="${px(H * 0.09)}" r="${px(W * 0.035)}" fill="#f6c76b" opacity="0.8"/><circle cx="${px(W * 0.91)}" cy="${px(H * 0.91)}" r="${px(W * 0.035)}" fill="#f6c76b" opacity="0.8"/>`); } },
+    neutral_linen: { name: "Linen & frame", group: "Neutral", dark: false, svg: (W, H) => wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="#f5f0e8"/>` + paper(W, H, "#b9a992", 0.35) +
+      `<rect x="${W * 0.035}" y="${W * 0.035}" width="${W * 0.93}" height="${H - W * 0.07}" fill="none" stroke="#b39b7e" stroke-width="${px(2 * S(W))}" opacity="0.7"/><rect x="${W * 0.05}" y="${W * 0.05}" width="${W * 0.9}" height="${H - W * 0.1}" fill="none" stroke="#b39b7e" stroke-width="${px(1 * S(W))}" opacity="0.5"/>`) },
+    neutral_dots: { name: "Taupe dots", group: "Neutral", dark: false, svg: (W, H) => wrap(W, H,
+      `<rect width="${W}" height="${H}" fill="#f7f3ee"/><rect width="${W}" height="${H}" fill="url(#dots)"/><rect width="${W}" height="${H}" fill="url(#vig)"/>`,
+      `<pattern id="dots" width="${W / 20}" height="${W / 20}" patternUnits="userSpaceOnUse"><circle cx="${W / 40}" cy="${W / 40}" r="${px(W / 240)}" fill="#a79582" opacity="0.5"/></pattern>` + vignette(W, H, "#a79582", 0.18)) },
+  };
+  return designs;
+})();
+
+</script>
 <script>
 (() => {
   // ------------------------------------------------------------------ config (public values only)
@@ -503,12 +579,14 @@
   // affiliate_url, name, brand, path) — nothing in the library changes shape.
   $("amazonSearch").addEventListener("click", () => {
     const q = prompt("Search Amazon Fashion for…", ""); if (q == null) return;
-    window.open("https://www.amazon.com/s?i=fashion&k=" + encodeURIComponent(q.trim()), "_blank");
+    window.open(amazonSearchUrl(q.trim()), "_blank");
     amazonLinkSheet("", true);
   });
   $("amazonLink").addEventListener("click", () => amazonLinkSheet("", false));
+  // Plain Amazon search URL (no tag — tags belong on product links only). Price filter is in cents.
+  const amazonSearchUrl = (q, maxUsd) => "https://www.amazon.com/s?i=fashion&k=" + encodeURIComponent(q) + (maxUsd ? "&rh=p_36%3A0-" + Math.round(maxUsd * 100) : "");
   let pendingAmazon = null;
-  function amazonLinkSheet(prefill, afterSearch) {
+  function amazonLinkSheet(prefill, afterSearch, extra = {}) {
     openSheet(`<h3>Add from Amazon link</h3>
       <p class="hint">${afterSearch ? "Amazon opened in a new tab. On the product: <b>Share → Copy link</b>, then come back here and paste it." : "On the product page in Amazon: <b>Share → Copy link</b>, then paste it below."}</p>
       <div class="stack">
@@ -520,7 +598,7 @@
     const check = () => { const t = tagAmazon($("alUrl").value, state.settings.amazon_tag); $("alNote").textContent = t.note; $("alPhoto").disabled = !$("alUrl").value.trim(); return t; };
     $("alUrl").oninput = check; check();
     $("alPaste").onclick = async () => { try { $("alUrl").value = (await navigator.clipboard.readText()).trim(); check(); } catch { note("alMsg", "Clipboard access was blocked — long-press the field and choose Paste.", true); } };
-    $("alPhoto").onclick = () => { pendingAmazon = { url: $("alUrl").value.trim() }; $("amazonFile").click(); };
+    $("alPhoto").onclick = () => { pendingAmazon = { url: $("alUrl").value.trim(), ...extra }; $("amazonFile").click(); };
   }
   $("amazonFile").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; const p = pendingAmazon; pendingAmazon = null; if (f) { closeSheet(); importWizard(f, p || {}); } });
   function garmentFields(x = {}) {
@@ -570,6 +648,8 @@
       <div id="iwMsg" class="msg"></div>`;
     $("iwExtract").textContent = `Extract clothing · ${cost("extract")} credit`; $("iwExtract").disabled = info.clean; $("iwSave").disabled = false; $("iwSave").textContent = "Save to My Clothing";
     if (prefill.url) { $("gUrl").value = prefill.url; $("gUrlNote").textContent = tagAmazon(prefill.url, state.settings.amazon_tag).note; }
+    if (prefill.category) $("gCat").value = prefill.category;
+    if (prefill.name) $("gName").value = prefill.name;
     $("importer").classList.remove("hidden"); $("importer").scrollTop = 0; document.body.style.overflow = "hidden";
 
     const wrap = $("cropWrap"), box = $("cropBox"), img = $("cropImg");
@@ -619,7 +699,8 @@
         if (cutout) { cutout_path = base + "_x.png"; await upload(cutout_path, cutout); if (cutoutPath) removeFiles([cutoutPath]); }
         const { error } = await sb.from("garments").insert({ id, source_path: base + "_src.jpg", path: base + ".jpg", thumb_path: base + "_t.jpg", cutout_path, ...readGarmentFields() });
         if (error) throw new Error(error.message);
-        closeImporter(); await loadAll(); showTab("clothing");
+        closeImporter(); await loadAll();
+        if (prefill.onSaved) prefill.onSaved(id); else showTab("clothing");
       } catch (e) { note("iwMsg", e.message, true); $("iwSave").disabled = false; }
     };
   }
@@ -1014,6 +1095,11 @@
     $("bgRow").querySelectorAll("[data-bg]").forEach((b) => b.onclick = () => { ed.layout.bg = b.dataset.bg; pushHistory(); renderStatic(); draw(); });
     $("bgCustom").oninput = (e) => { ed.layout.bg = e.target.value; draw(); };
     $("bgCustom").onchange = () => { pushHistory(); renderStatic(); };
+    const groups = ["Fall", "Winter", "Spring", "Summer", "Neutral"]; const cur = designOf(ed.layout.bg); ed.bgGroup = ed.bgGroup || (cur ? cur.group : "Fall");
+    $("designRow").innerHTML = `<div class="chips" style="margin:8px 0 6px"><button class="chip ${cur ? "" : "on"}" data-g="plain">Plain</button>${groups.map((g) => `<button class="chip ${cur && ed.bgGroup === g ? "on" : ""}" data-g="${g}">${g}</button>`).join("")}</div>` +
+      (cur || ed.bgGroup ? `<div class="strip" id="designStrip">${Object.entries(BG_DESIGNS).filter(([, d]) => d.group === ed.bgGroup).map(([k, d]) => `<button class="tile bgthumb ${ed.layout.bg === "design:" + k ? "sel" : ""}" data-d="${k}" style="background-image:url('${designUri("design:" + k, 270, 338)}')" title="${esc(d.name)}"><span class="cap">${esc(d.name)}</span></button>`).join("")}</div>` : "");
+    $("designRow").querySelectorAll("[data-g]").forEach((c) => c.onclick = () => { if (c.dataset.g === "plain") { if (designOf(ed.layout.bg)) { ed.layout.bg = "#f6efe4"; pushHistory(); } } else ed.bgGroup = c.dataset.g; renderStatic(); draw(); });
+    $("designRow").querySelectorAll("[data-d]").forEach((b) => b.onclick = () => { ed.layout.bg = "design:" + b.dataset.d; pushHistory(); renderStatic(); draw(); });
     $("sizeRow").querySelectorAll(".chip").forEach((c) => { c.classList.toggle("on", c.dataset.size === ed.layout.size); c.onclick = () => { ed.layout.size = c.dataset.size; pushHistory(); renderStatic(); draw(); }; });
     $("presetRow").innerHTML = (ed.layout.mode === "clothing" ? Object.entries(PRESETS) : [["around", "Around the person"]]).map(([k, v]) => `<button class="chip" data-p="${k}">${v}</button>`).join("");
     $("presetRow").querySelectorAll(".chip").forEach((c) => c.onclick = () => { applyPreset(ed.layout, c.dataset.p); pushHistory(); draw(); });
@@ -1024,14 +1110,19 @@
     $("addTools").querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => { const g = garment(b.dataset.add); const p = g.cutout_path || g.path; if (!ed.imgs[p]) ed.imgs[p] = await blobUrl(p); ed.layout.layers.push({ id: newId(), kind: "item", g: g.id, x: 0.5, y: 0.5, w: 0.3, rot: 0 }); ed.sel = ed.layout.layers.length - 1; pushHistory(); draw(); });
     renderLinks();
   }
-  function isDark(bg) { if (!/^#/.test(bg)) return false; const n = parseInt(bg.slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 110; }
+  function isDark(bg) { if (designOf(bg)) return !!designOf(bg).dark; if (!/^#/.test(bg)) return false; const n = parseInt(bg.slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 110; }
   function collageItems() { return [...new Set(ed.layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean); }
   function renderLinks() {
     const items = collageItems();
     $("edLinks").textContent = items.length ? items.map((g) => `${g.name}${g.brand ? " — " + g.brand : ""}: ${g.affiliate_url || "(no link yet)"}`).join("\n") : "No items yet.";
     $("edCopyLinks").onclick = () => copyText(linksText($("edName").value, "", items), "edMsg");
   }
-  function stageBg(bg) { return bg.startsWith("g") ? `linear-gradient(160deg,${GRADS[bg][0]},${GRADS[bg][1]})` : bg; }
+  const designOf = (bg) => (typeof bg === "string" && bg.startsWith("design:")) ? BG_DESIGNS[bg.slice(7)] : null;
+  const designUri = (bg, W, H) => "data:image/svg+xml;charset=utf-8," + encodeURIComponent(designOf(bg).svg(W, H));
+  function stageBg(bg) {
+    if (designOf(bg)) return `url("${designUri(bg, 1080, Math.round(1080 * ratio(ed.layout.size)))}") center / 100% 100% no-repeat`;
+    return bg.startsWith("g") ? `linear-gradient(160deg,${GRADS[bg][0]},${GRADS[bg][1]})` : bg;
+  }
   function draw() {
     const W = stage.clientWidth, H = Math.round(W * ratio(ed.layout.size));
     stage.style.height = H + "px"; stage.style.background = stageBg(ed.layout.bg);
@@ -1109,8 +1200,8 @@
   async function renderLayout(layout, W) {
     const H = Math.round(W * ratio(layout.size)), c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d");
     const bg = layout.bg || "#ffffff";
-    if (bg.startsWith("g")) { const gr = ctx.createLinearGradient(0, 0, W, H); gr.addColorStop(0, GRADS[bg][0]); gr.addColorStop(1, GRADS[bg][1]); ctx.fillStyle = gr; } else ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, W, H);
+    if (designOf(bg)) { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); ctx.drawImage(await loadImg(designUri(bg, W, H)), 0, 0, W, H); }
+    else { if (bg.startsWith("g")) { const gr = ctx.createLinearGradient(0, 0, W, H); gr.addColorStop(0, GRADS[bg][0]); gr.addColorStop(1, GRADS[bg][1]); ctx.fillStyle = gr; } else ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); }
     try { await document.fonts.load('600 40px Fraunces'); await document.fonts.load('600 40px "Inter Tight"'); } catch {}
     for (const l of layout.layers) {
       ctx.save(); ctx.translate(l.x * W, l.y * H); ctx.rotate(((l.rot || 0) * Math.PI) / 180);
@@ -1261,66 +1352,133 @@
     };
   }
 
-  // ================================================================== DISCOVER (Amazon Creators API + AI styling)
-  const dv = { run: null, busy: false };
+  // ================================================================== DISCOVER (AI outfit ideas + Amazon Creators API when available)
+  const dv = { run: null, busy: false, fills: {} };   // fills[runId][outfitIndex][role] = garment id
+  const ROLE_CAT = { top: "tops", bottom: "bottoms", shoes: "shoes", bag: "bag", accessory: "accessory" };
+  const ROLE_LABEL = { top: "Top", bottom: "Bottom", shoes: "Shoes", bag: "Bag", accessory: "Accessory" };
   async function loadDiscoverStatus() {
     try {
-      const s = await api("/discover/runs");
-      $("dvCaps").textContent = s.configured ? `${s.runs_today}/${s.runs_per_day} runs today · up to ${s.amazon_calls_per_run} Amazon searches per run · AI: ${s.model} (about a cent per run)` : "Not set up yet — add the Amazon and Gemini secrets in Supabase (see setup steps).";
-      $("dvGo").disabled = !s.configured || dv.busy;
+      const s = await api("/discover/runs"); dv.status = s;
+      const amz = s.amazon || {};
+      $("dvCaps").textContent = (s.configured && amz.available ? "Amazon product search is on. " : "") + `${s.runs_today}/${s.runs_per_day} runs today · AI stylist: ${s.model} (about a cent per run)`;
+      $("dvGo").disabled = dv.busy;
       $("dvRuns").innerHTML = (s.runs || []).map((r) => `<button class="card" data-run="${r.id}" style="text-align:left;cursor:pointer;margin:0"><strong>${esc(r.prompt)}</strong><div class="kv">${esc(fmtWhen(r.created_at))} · ${esc(r.status)} · ${(r.outfits || []).filter(Boolean).length} outfit(s)${r.error ? " · " + esc(r.error) : ""}</div></button>`).join("") || '<div class="empty">No runs yet.</div>';
       $("dvRuns").querySelectorAll("[data-run]").forEach((b) => b.onclick = () => { const r = s.runs.find((x) => x.id === b.dataset.run); if (r) { dv.run = r; renderRun(r); window.scrollTo(0, 0); } });
     } catch (e) { $("dvCaps").textContent = e.message; }
   }
   $("dvExamples").querySelectorAll(".chip").forEach((c) => c.onclick = () => { $("dvPrompt").value = c.textContent; });
-  $("dvGo").onclick = async () => {
-    const prompt = $("dvPrompt").value.trim(); if (!prompt) { note("dvMsg", "Describe the outfits you want first.", true); return; }
-    if (!confirm(`Find outfits for:\n"${prompt}"\n\nThis uses one discovery run (Amazon searches + a few AI calls, roughly a cent). Continue?`)) return;
-    dv.busy = true; $("dvGo").disabled = true; $("dvResults").innerHTML = ""; note("dvMsg", "Planning outfits…");
+  $("dvGo").onclick = () => startDiscovery($("dvPrompt").value.trim());
+  async function startDiscovery(prompt) {
+    if (!prompt) { note("dvMsg", "Describe the outfits you want first.", true); return; }
+    if (!confirm(`Create outfit ideas for:\n"${prompt}"\n\nThis uses one discovery run (a few AI calls, about a cent; Amazon searches only if your account is eligible). Continue?`)) return;
+    dv.busy = true; $("dvGo").disabled = true; $("dvResults").innerHTML = ""; note("dvMsg", "Styling your outfits…");
     try {
       const run = await api("/discover", { method: "POST", body: JSON.stringify({ prompt, idempotency_key: crypto.randomUUID() }) });
-      dv.run = run; renderRun(run);
+      dv.run = run; run.outfits = run.outfits || []; renderRun(run);
       const n = (run.plan?.outfits || []).length;
       for (let i = 0; i < n; i++) {
-        if (run.outfits?.[i]) continue;
-        note("dvMsg", `Searching Amazon for outfit ${i + 1} of ${n}…`);
-        try { const o = await api("/discover/build", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i }) }); run.outfits = run.outfits || []; run.outfits[i] = o; renderRun(run); }
+        if (run.outfits[i]) continue;
+        note("dvMsg", `Outfit ${i + 1} of ${n}…`);
+        try { run.outfits[i] = await api("/discover/build", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i }) }); renderRun(run); }
         catch (e) { note("dvMsg", `Outfit ${i + 1}: ${e.message}`, true); }
       }
-      note("dvMsg", "Done. Swap any piece, then save the outfits you like.");
+      note("dvMsg", "Done.");
     } catch (e) { note("dvMsg", e.message, true); }
     dv.busy = false; loadDiscoverStatus();
-  };
+  }
+  function runFills(run, i) { dv.fills[run.id] = dv.fills[run.id] || {}; dv.fills[run.id][i] = dv.fills[run.id][i] || {}; return dv.fills[run.id][i]; }
+  function ideaText(o) { return [o.name, o.vibe, o.palette?.length ? "Palette: " + o.palette.join(", ") : "", "", ...(o.slots || []).map((s) => `${ROLE_LABEL[s.role] || s.role}: ${s.description || s.query}${s.max_usd ? ` (up to $${s.max_usd})` : ""}`)].filter((l) => l !== "").join("\n"); }
   function renderRun(run) {
     const plan = run.plan || { outfits: [] }; const built = run.outfits || [];
-    $("dvResults").innerHTML = plan.outfits.map((p, i) => {
+    const amz = built.find((o) => o && o.amazon)?.amazon || dv.status?.amazon || null;
+    const banner = amz && !amz.available ? `<div class="card" style="border-color:var(--accent)"><strong>Outfit ideas mode</strong><div class="kv" style="margin-top:4px">${esc(amz.message || "Amazon product search isn't available right now.")}</div></div>` : "";
+    $("dvResults").innerHTML = banner + plan.outfits.map((p, i) => {
       const o = built[i];
-      if (!o) return `<div class="card"><strong>${esc(p.name || "Outfit " + (i + 1))}</strong><div class="kv">${esc(p.vibe || "")}</div><div class="msg"><span class="spinner"></span> finding pieces…</div></div>`;
-      const priced = o.items.filter((it) => it.price != null).length;
-      return `<div class="card stack" data-o="${i}">
-        <div><strong>${esc(o.name)}</strong><div class="kv">${esc(o.vibe || "")}</div></div>
-        <div class="ofit">${o.items.map((it) => `<div class="tile" data-role="${esc(it.role)}"><img src="${esc(it.image)}" alt="" loading="lazy"><span class="cap">${esc(it.price_display || "")}</span></div>`).join("")}</div>
-        <div class="stack" style="gap:6px">${o.items.map((it) => `<div class="row" style="align-items:flex-start"><div style="flex:1"><div style="font-size:14px">${esc(it.title.slice(0, 80))}${it.title.length > 80 ? "…" : ""}</div><div class="kv">${esc(it.role)}${it.brand ? " · " + esc(it.brand) : ""} · <span class="price">${esc(it.price_display || "price on Amazon")}</span>${it.availability && it.availability !== "IN_STOCK" ? " · " + esc(it.availability.toLowerCase().replace(/_/g, " ")) : ""}</div></div>
-          <div style="flex:0 0 auto;display:flex;gap:6px"><a class="btn secondary small" href="${esc(it.url)}" target="_blank" rel="noopener">View</a><button class="btn secondary small" data-swap="${esc(it.role)}">Swap</button></div></div>`).join("")}</div>
-        <div class="kv">${esc(o.why || "")}</div>
-        <div class="kv">Total <span class="price">$${(o.total || 0).toFixed(2)}</span>${priced < o.items.length ? " (some prices unavailable)" : ""} · prices as of ${esc(fmtWhen(o.items[0]?.fetched_at))}</div>
-        <div class="row"><button class="btn" data-save="${i}">Save outfit</button><button class="btn secondary" data-copy="${i}">Copy links</button></div>
-        <div class="msg" id="dvOMsg${i}"></div></div>`;
-    }).join("");
-    $("dvResults").querySelectorAll("[data-swap]").forEach((b) => b.onclick = async () => {
-      const card = b.closest("[data-o]"), i = Number(card.dataset.o), role = b.dataset.swap; const o = built[i];
+      if (!o) return `<div class="card"><strong>${esc(p.name || "Outfit " + (i + 1))}</strong><div class="kv">${esc(p.vibe || "")}</div><div class="msg"><span class="spinner"></span> styling…</div></div>`;
+      if (o.items && o.items.length) return productCard(run, o, i);
+      return ideaCard(run, { ...o, slots: o.slots || p.slots || [] }, i);
+    }).join("") + (plan.outfits.length ? `<button class="btn secondary" id="dvAgain">New ideas for the same prompt</button>` : "");
+    bindRunCards(run);
+    const again = $("dvAgain"); if (again) again.onclick = () => startDiscovery(run.prompt);
+    fillImgs($("dvResults"));
+  }
+  function productCard(run, o, i) {
+    const priced = o.items.filter((it) => it.price != null).length;
+    return `<div class="card stack" data-o="${i}">
+      <div><strong>${esc(o.name)}</strong><div class="kv">${esc(o.vibe || "")}</div></div>
+      <div class="ofit">${o.items.map((it) => `<div class="tile" data-role="${esc(it.role)}"><img src="${esc(it.image)}" alt="" loading="lazy"><span class="cap">${esc(it.price_display || "")}</span></div>`).join("")}</div>
+      <div class="stack" style="gap:6px">${o.items.map((it) => `<div class="row" style="align-items:flex-start"><div style="flex:1"><div style="font-size:14px">${esc(it.title.slice(0, 80))}${it.title.length > 80 ? "…" : ""}</div><div class="kv">${esc(it.role)}${it.brand ? " · " + esc(it.brand) : ""} · <span class="price">${esc(it.price_display || "price on Amazon")}</span></div></div>
+        <div style="flex:0 0 auto;display:flex;gap:6px"><a class="btn secondary small" href="${esc(it.url)}" target="_blank" rel="noopener">View</a><button class="btn secondary small" data-swap="${esc(it.role)}">Swap</button></div></div>`).join("")}</div>
+      <div class="kv">${esc(o.why || "")}</div>
+      <div class="kv">Total <span class="price">$${(o.total || 0).toFixed(2)}</span>${priced < o.items.length ? " (some prices unavailable)" : ""} · prices as of ${esc(fmtWhen(o.items[0]?.fetched_at))}</div>
+      <div class="row"><button class="btn" data-save="${i}">Save outfit</button><button class="btn secondary" data-copy="${i}">Copy links</button></div>
+      <div class="msg" id="dvOMsg${i}"></div></div>`;
+  }
+  function ideaCard(run, o, i) {
+    const fills = runFills(run, i); const filled = Object.keys(fills).length, total = (o.slots || []).length;
+    return `<div class="card stack" data-o="${i}">
+      <div><strong>${esc(o.name)}</strong><div class="kv">${esc(o.vibe || "")}${o.palette?.length ? " · " + esc(o.palette.join(", ")) : ""}</div></div>
+      ${(o.slots || []).map((s) => { const g = fills[s.role] ? garment(fills[s.role]) : null; return `<div class="card" style="margin:0;padding:10px" data-role="${esc(s.role)}">
+        <div class="row" style="align-items:flex-start">
+          ${g ? `<div style="flex:0 0 56px"><div class="tile contain" style="width:56px"><img ${imgAttr(g, "thumb")} alt=""></div></div>` : ""}
+          <div style="flex:1;min-width:0"><div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">${esc(ROLE_LABEL[s.role] || s.role)}${s.max_usd ? ` · up to $${esc(s.max_usd)}` : ""}</div>
+          <div style="font-size:14px">${g ? esc(g.name) + ' <span class="kv">(added)</span>' : esc(s.description || s.query)}</div></div></div>
+        <div class="chips" style="margin-top:8px">
+          ${g ? `<button class="chip" data-unfill="${esc(s.role)}">Remove</button>` : `<a class="chip" href="${esc(amazonSearchUrl(s.query, s.max_usd))}" target="_blank" rel="noopener" style="text-decoration:none">Search Amazon</a>
+          <button class="chip" data-link="${esc(s.role)}">Paste Amazon link</button><button class="chip" data-pick="${esc(s.role)}">My Clothing</button><button class="chip" data-upload="${esc(s.role)}">Upload photo</button>`}
+        </div></div>`; }).join("")}
+      <div class="kv">${filled}/${total} pieces added. Save when you're ready — you can finish the rest later from Saved Outfits.</div>
+      <div class="row"><button class="btn" data-saveidea="${i}">${filled ? "Save outfit" : "Save idea for later"}</button><button class="btn secondary" data-copyidea="${i}">Copy idea</button></div>
+      <div class="msg" id="dvOMsg${i}"></div></div>`;
+  }
+  function bindRunCards(run) {
+    const built = run.outfits || [];
+    const R = $("dvResults");
+    R.querySelectorAll("[data-swap]").forEach((b) => b.onclick = async () => {
+      const i = Number(b.closest("[data-o]").dataset.o), role = b.dataset.swap; const o = built[i];
       if (!confirm(`Swap the ${role} for another option? (1–2 Amazon searches + 1 AI call)`)) return;
       b.disabled = true; note("dvOMsg" + i, "Finding another " + role + "…");
-      try { const exclude = (o.swapped = o.swapped || []); exclude.push(o.items.find((it) => it.role === role)?.asin); const upd = await api("/discover/swap", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i, role, exclude }) }); upd.swapped = exclude; built[i] = upd; renderRun(run); }
+      try { const exclude = (o.swapped = o.swapped || []); exclude.push(o.items.find((it) => it.role === role)?.asin); const upd = await api("/discover/swap", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i, role, exclude }) }); upd.swapped = exclude; built[i] = { ...o, ...upd }; renderRun(run); }
       catch (e) { note("dvOMsg" + i, e.message, true); b.disabled = false; }
     });
-    $("dvResults").querySelectorAll("[data-save]").forEach((b) => b.onclick = async () => {
+    R.querySelectorAll("[data-save]").forEach((b) => b.onclick = async () => {
       const i = Number(b.dataset.save), o = built[i]; const name = prompt("Outfit name", o.name); if (name == null) return;
       b.disabled = true; note("dvOMsg" + i, "Saving…");
-      try { await api("/discover/save", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i, name }) }); await loadAll(); note("dvOMsg" + i, "Saved to My Clothing and Saved Outfits."); }
+      try { const r = await api("/discover/save", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i, name }) }); await loadAll(); note("dvOMsg" + i, "Saved to My Clothing and Saved Outfits."); afterOutfitSaved(r.outfit_id, i); }
       catch (e) { note("dvOMsg" + i, e.message, true); b.disabled = false; }
     });
-    $("dvResults").querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => { const o = built[Number(b.dataset.copy)]; copyText([o.name, "", ...o.items.map((it) => `${it.title.slice(0, 80)}: ${it.url}`), "", (state.settings.disclosure || DEFAULT_DISCLOSURE)].join("\n"), "dvOMsg" + b.dataset.copy); });
+    R.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => { const o = built[Number(b.dataset.copy)]; copyText([o.name, "", ...o.items.map((it) => `${it.title.slice(0, 80)}: ${it.url}`), "", (state.settings.disclosure || DEFAULT_DISCLOSURE)].join("\n"), "dvOMsg" + b.dataset.copy); });
+    // idea cards
+    const slotOf = (el) => ({ i: Number(el.closest("[data-o]").dataset.o), role: el.closest("[data-role]").dataset.role });
+    const ideaSlot = (i, role) => ((built[i]?.slots) || run.plan.outfits[i].slots).find((s) => s.role === role) || {};
+    R.querySelectorAll("[data-unfill]").forEach((b) => b.onclick = () => { const { i, role } = slotOf(b); delete runFills(run, i)[role]; renderRun(run); });
+    R.querySelectorAll("[data-link]").forEach((b) => b.onclick = () => { const { i, role } = slotOf(b); const s = ideaSlot(i, role);
+      amazonLinkSheet("", false, { category: ROLE_CAT[role], name: (s.description || s.query || "").slice(0, 60), onSaved: (gid) => { runFills(run, i)[role] = gid; showTab("discover"); renderRun(run); } }); });
+    R.querySelectorAll("[data-upload]").forEach((b) => b.onclick = () => { const { i, role } = slotOf(b); const s = ideaSlot(i, role);
+      pendingAmazon = { category: ROLE_CAT[role], name: (s.description || s.query || "").slice(0, 60), onSaved: (gid) => { runFills(run, i)[role] = gid; showTab("discover"); renderRun(run); } }; $("amazonFile").click(); });
+    R.querySelectorAll("[data-pick]").forEach((b) => b.onclick = () => { const { i, role } = slotOf(b);
+      openSheet(`<h3>Pick from My Clothing</h3><div class="grid">${state.garments.map((g) => `<button class="tile contain" data-g="${g.id}"><img ${imgAttr(g, "thumb")} alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">No clothing saved yet.</div>'}</div>`);
+      $("sheetBody").querySelectorAll("[data-g]").forEach((t) => t.onclick = () => { runFills(run, i)[role] = t.dataset.g; closeSheet(); renderRun(run); }); });
+    R.querySelectorAll("[data-saveidea]").forEach((b) => b.onclick = async () => {
+      const i = Number(b.dataset.saveidea); const o = { ...(built[i] || {}), slots: (built[i]?.slots) || run.plan.outfits[i].slots, name: built[i]?.name || run.plan.outfits[i].name, vibe: built[i]?.vibe || run.plan.outfits[i].vibe, palette: built[i]?.palette || run.plan.outfits[i].palette };
+      const name = prompt("Outfit name", o.name); if (name == null) return;
+      const ids = Object.values(runFills(run, i)).filter((gid) => garment(gid));
+      b.disabled = true; note("dvOMsg" + i, "Saving…");
+      try {
+        const { data, error } = await sb.from("outfits").insert({ name, caption: ideaText(o) }).select("id").single(); if (error) throw new Error(error.message);
+        if (ids.length) { const { error: e2 } = await sb.from("outfit_items").insert(ids.map((gid, k) => ({ outfit_id: data.id, garment_id: gid, position: k }))); if (e2) throw new Error(e2.message); }
+        await loadAll(); note("dvOMsg" + i, ids.length ? "Saved to Saved Outfits." : "Idea saved — add pieces any time from Saved Outfits → Edit items."); afterOutfitSaved(data.id, i);
+      } catch (e) { note("dvOMsg" + i, e.message, true); b.disabled = false; }
+    });
+    R.querySelectorAll("[data-copyidea]").forEach((b) => b.onclick = () => { const i = Number(b.dataset.copyidea); const o = { ...(built[i] || {}), slots: (built[i]?.slots) || run.plan.outfits[i].slots, name: built[i]?.name || run.plan.outfits[i].name, vibe: built[i]?.vibe || run.plan.outfits[i].vibe, palette: built[i]?.palette || run.plan.outfits[i].palette }; copyText(ideaText(o), "dvOMsg" + i); });
+  }
+  function afterOutfitSaved(outfitId, i) {
+    const o = state.outfits.find((x) => x.id === outfitId); if (!o) return;
+    const own = o.items.map(garment).filter((g) => g && !isApi(g));
+    const el = $("dvOMsg" + i); if (!el) return;
+    el.insertAdjacentHTML("afterend", `<div class="row" style="margin-top:6px"><button class="btn secondary small" data-open-outfit="${outfitId}">Open in Saved Outfits</button>${own.length ? `<button class="btn small" data-collage-outfit="${outfitId}">Make a collage</button>` : ""}</div>`);
+    el.parentElement.querySelector("[data-open-outfit]").onclick = () => { showTab("outfits"); outfitSheet(outfitId); };
+    const mk = el.parentElement.querySelector("[data-collage-outfit]"); if (mk) mk.onclick = () => { showTab("collages"); newCollageSheet(o); };
   }
 
   // ================================================================== FACEBOOK (Page queue + profile sharing)
