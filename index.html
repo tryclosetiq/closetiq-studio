@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Studio">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#f5efe6">
+<title>ClosetIQ Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter+Tight:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#f5efe6; --card:#fffcf7; --ink:#1c1915; --muted:#70675c; --line:#e5dbcc; --soft:#efe6d9;
+    --accent:#a8894f; --accent-ink:#fffaf0; --danger:#a1352c; --ok:#3b6d47; --ring:#a8894f;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme=light]){
+    --bg:#15120e; --card:#1f1a14; --ink:#f3ede4; --muted:#a79d90; --line:#352e26; --soft:#2a241c;
+    --accent:#cfb27a; --accent-ink:#1c1915; --ring:#cfb27a;
+  }}
+  *{box-sizing:border-box} html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "Inter Tight",system-ui,sans-serif;min-height:100dvh}
+  header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);
+         padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:baseline;justify-content:space-between;border-bottom:1px solid var(--line)}
+  header h1{font:600 22px/1 Fraunces,serif;margin:0}
+  header .usage{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  main{padding:14px 16px calc(84px + env(safe-area-inset-bottom))}
+  h2{font:600 24px/1.15 Fraunces,serif;margin:4px 0 12px;text-wrap:balance}
+  h3{font:600 17px/1.2 "Inter Tight",sans-serif;margin:14px 0 8px}
+  p.hint{color:var(--muted);font-size:14px;margin:0 0 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;letter-spacing:.03em;text-transform:uppercase}
+  input,select,textarea,button{font:inherit;color:inherit}
+  input[type=text],input[type=url],input[type=email],input[type=password],select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:transparent}
+  textarea{min-height:70px;resize:vertical}
+  .stack{display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:10px;align-items:center}
+  .row>*{flex:1}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:13px 14px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:pointer}
+  .btn.secondary{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  .btn.danger{background:transparent;border:1px solid var(--line);color:var(--danger)}
+  .btn.small{padding:8px 10px;font-size:14px;width:auto}
+  .btn:disabled{opacity:.5;cursor:default}
+  :is(.btn,input,select,textarea,.tab):focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .tile{position:relative;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:var(--soft);border:0;padding:0;cursor:pointer}
+  .tile img{width:100%;height:100%;object-fit:cover;display:block}
+  .tile .cap{position:absolute;left:0;right:0;bottom:0;padding:18px 8px 6px;font-size:12px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.55));text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tile.add{display:grid;place-items:center;border:1.5px dashed var(--line);color:var(--muted);font-size:14px;background:transparent}
+  .tile.sel{outline:3px solid var(--ring);outline-offset:-3px}
+  .strip{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;scroll-snap-type:x proximity}
+  .strip .tile{flex:0 0 96px;scroll-snap-align:start}
+  .msg{font-size:14px;min-height:1.4em;margin-top:6px}
+  .msg.err{color:var(--danger)} .msg.ok{color:var(--ok)}
+  .empty{color:var(--muted);font-size:14px;padding:18px 0;text-align:center}
+  nav{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;background:var(--card);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .tab{flex:1;background:none;border:0;padding:6px 2px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
+  .tab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .tab.on{color:var(--accent);font-weight:600}
+  .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:20;display:none}
+  .sheet{position:fixed;left:0;right:0;bottom:0;max-height:92dvh;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));z-index:21;display:none;box-shadow:0 -6px 30px rgba(0,0,0,.2)}
+  .sheet.open,.sheet-bg.open{display:block}
+  .sheet .handle{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+  .big{width:100%;border-radius:12px;display:block;background:var(--soft)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:transparent;font-size:13px;cursor:pointer}
+  .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .kv{font-size:13px;color:var(--muted)}
+  .links a{color:var(--accent);word-break:break-all}
+  .hidden{display:none !important}
+  /* collage */
+  .stage{position:relative;width:100%;aspect-ratio:4/5;border-radius:12px;overflow:hidden;touch-action:none;background:#fff;border:1px solid var(--line);user-select:none;-webkit-user-select:none}
+  .stage img{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none;-webkit-user-drag:none}
+  .stage .box{position:absolute;touch-action:none}
+  .stage .box.sel{outline:2px solid var(--ring);outline-offset:2px}
+  .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;vertical-align:-3px}
+  @media (prefers-reduced-motion:no-preference){.spinner{animation:spin .9s linear infinite}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .steps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .steps .tile{aspect-ratio:3/4}
+</style>
+</head>
+<body>
+<header><h1>ClosetIQ Studio</h1><span class="usage" id="usage"></span></header>
+
+<main id="login" class="stack" style="max-width:420px;margin:40px auto 0">
+  <h2>Welcome back</h2>
+  <p class="hint">Private studio. Sign in with your account.</p>
+  <form id="loginForm" class="card stack" autocomplete="on">
+    <div><label for="email">Email</label><input id="email" type="email" autocomplete="username" required></div>
+    <div><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required></div>
+    <button class="btn" type="submit">Sign in</button>
+    <div id="loginMsg" class="msg err"></div>
+  </form>
+</main>
+
+<main id="app" class="hidden">
+  <section id="tab-selfies">
+    <h2>My Selfies</h2>
+    <p class="hint">Mirror selfies you'll reuse for try-ons. Tap one for options.</p>
+    <div class="grid" id="selfieGrid"></div>
+    <input id="selfieFile" type="file" accept="image/*" multiple class="hidden">
+  </section>
+
+  <section id="tab-clothing" class="hidden">
+    <h2>My Clothing</h2>
+    <p class="hint">Amazon product photos with names and affiliate links.</p>
+    <div class="grid" id="garmentGrid"></div>
+  </section>
+
+  <section id="tab-tryon" class="hidden">
+    <h2>AI Try-On</h2>
+    <div class="card stack">
+      <div><label>Selfie</label><div class="strip" id="pickSelfie"></div></div>
+      <div><label>Clothing</label><div class="strip" id="pickGarment"></div></div>
+      <div id="srcRow" class="hidden"><label>Clothing image</label>
+        <div class="chips"><button class="chip on" data-src="path">Original photo</button><button class="chip" data-src="cutout">Extracted</button></div></div>
+      <div><label for="preset">Quality</label><select id="preset"></select></div>
+      <div id="v16opts" class="row hidden">
+        <div><label for="category">Garment type</label>
+          <select id="category"><option value="auto">Auto</option><option value="tops">Top</option><option value="bottoms">Bottom</option><option value="one-pieces">One-piece</option></select></div>
+        <div><label for="gpt">Photo type</label>
+          <select id="gpt"><option value="auto">Auto</option><option value="flat-lay">Flat-lay / product</option><option value="model">On a model</option></select></div>
+      </div>
+      <div id="maxopts"><label for="prompt">Instructions (optional)</label>
+        <textarea id="prompt" placeholder="e.g. keep the phone, mirror and room exactly as in the photo"></textarea></div>
+      <button class="btn" id="generate" disabled>Generate</button>
+      <div id="runMsg" class="msg"></div>
+    </div>
+    <div id="result" class="card stack hidden">
+      <img class="big" id="out" alt="Try-on result">
+      <div class="row"><button class="btn" id="saveOut">Save to Photos</button><button class="btn secondary" id="reuseOut">Use as selfie</button></div>
+    </div>
+  </section>
+
+  <section id="tab-photos" class="hidden">
+    <h2>My Photos</h2>
+    <p class="hint">Everything you've generated. Tap to view, save or delete.</p>
+    <div class="grid" id="genGrid"></div>
+  </section>
+
+  <section id="tab-outfits" class="hidden">
+    <h2>Saved Outfits</h2>
+    <p class="hint">Group clothing into outfits, build a collage, keep the links together.</p>
+    <button class="btn secondary" id="newOutfit">+ New outfit</button>
+    <div id="outfitList" class="stack" style="margin-top:12px"></div>
+  </section>
+</main>
+
+<nav id="nav" class="hidden">
+  <button class="tab on" data-tab="selfies"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Selfies</button>
+  <button class="tab" data-tab="clothing"><svg viewBox="0 0 24 24"><path d="M8 4l4 2 4-2 4 4-3 2v10H7V10L4 8z"/></svg>Clothing</button>
+  <button class="tab" data-tab="tryon"><svg viewBox="0 0 24 24"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg>Try-On</button>
+  <button class="tab" data-tab="photos"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>Photos</button>
+  <button class="tab" data-tab="outfits"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>Outfits</button>
+</nav>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet"><div class="handle"></div><div id="sheetBody"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+(() => {
+  // ------------------------------------------------------------------ config (public values only)
+  const SUPABASE_URL = "https://yjjdzugecimjwgwtkwyw.supabase.co";
+  const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqamR6dWdlY2ltandnd3Rrd3l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NjU5ODUsImV4cCI6MjEwNzM0MTk4NX0.Q0Is204-0M28vMwA9TGW8UJz_R4SJRNAmVunxSCyXko";
+  const API = SUPABASE_URL + "/functions/v1/studio/api";
+  const BUCKET = "studio";
+
+  const sb = supabase.createClient(SUPABASE_URL, ANON_KEY);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const state = { me: null, uid: null, selfies: [], garments: [], generations: [], outfits: [], sel: { selfie: null, garment: null, src: "path" }, urls: new Map() };
+
+  // ------------------------------------------------------------------ auth + api
+  async function token() { const { data } = await sb.auth.getSession(); return data.session?.access_token; }
+  async function api(path, opts = {}) {
+    const t = await token(); if (!t) throw new Error("Signed out");
+    const r = await fetch(API + path, { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + t, "content-type": "application/json" } });
+    const b = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(b.error || ("HTTP " + r.status));
+    return b;
+  }
+  $("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); $("loginMsg").textContent = "";
+    const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+    if (error) $("loginMsg").textContent = error.message; else boot();
+  });
+  sb.auth.getSession().then(({ data }) => { if (data.session) boot(); });
+
+  async function boot() {
+    try {
+      state.me = await api("/me"); state.uid = state.me.user_id;
+      setUsage(state.me.used_today, state.me.daily_cap);
+      $("preset").innerHTML = Object.entries(state.me.presets).map(([k, p]) =>
+        `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(p.label)} · ${p.credits} credit${p.credits > 1 ? "s" : ""}</option>`).join("");
+      togglePresetOpts();
+      $("login").classList.add("hidden"); $("app").classList.remove("hidden"); $("nav").classList.remove("hidden");
+      await loadAll();
+      api("/credits").then((c) => { $("usage").title = "FASHN balance " + c.credits.total; setUsage(state.me.used_today, state.me.daily_cap, c.credits.total); }).catch(() => {});
+    } catch (e) { $("loginMsg").textContent = e.message; await sb.auth.signOut(); }
+  }
+  function setUsage(used, cap, bal) { state.me.used_today = used; $("usage").textContent = `${used}/${cap} today` + (bal != null ? ` · ${bal} left` : ""); }
+
+  // ------------------------------------------------------------------ data
+  async function loadAll() {
+    const [s, g, gen, o, oi] = await Promise.all([
+      sb.from("selfies").select("*").order("created_at", { ascending: false }),
+      sb.from("garments").select("*").order("created_at", { ascending: false }),
+      sb.from("generations").select("*").order("created_at", { ascending: false }),
+      sb.from("outfits").select("*").order("updated_at", { ascending: false }),
+      sb.from("outfit_items").select("*").order("position"),
+    ]);
+    state.selfies = s.data || []; state.garments = g.data || []; state.generations = gen.data || [];
+    state.outfits = (o.data || []).map((x) => ({ ...x, items: (oi.data || []).filter((i) => i.outfit_id === x.id).map((i) => i.garment_id) }));
+    renderAll();
+  }
+  function renderAll() { renderSelfies(); renderGarments(); renderPickers(); renderPhotos(); renderOutfits(); }
+
+  // signed URLs (1 h), cached
+  async function url(path) {
+    if (!path) return "";
+    const c = state.urls.get(path); if (c && c.exp > Date.now()) return c.u;
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(path, 3600);
+    if (error) return "";
+    state.urls.set(path, { u: data.signedUrl, exp: Date.now() + 3300e3 }); return data.signedUrl;
+  }
+  async function fillImgs(root) { for (const img of root.querySelectorAll("img[data-path]")) img.src = await url(img.dataset.path); }
+  async function blobOf(path) { return await (await fetch(await url(path))).blob(); }
+
+  // ------------------------------------------------------------------ images
+  function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+  async function shrink(fileOrBlob, maxSide, type = "image/jpeg", q = 0.9) {
+    const u = URL.createObjectURL(fileOrBlob); const img = await loadImg(u); URL.revokeObjectURL(u);
+    const s = Math.min(1, maxSide / Math.max(img.width, img.height));
+    const c = document.createElement("canvas"); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise((r) => c.toBlob(r, type, q));
+  }
+  const toDataUrl = (blob) => new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+  async function upload(path, blob) {
+    const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type, upsert: true });
+    if (error) throw new Error(error.message);
+  }
+  async function removeFiles(paths) { const p = paths.filter(Boolean); if (p.length) await sb.storage.from(BUCKET).remove(p); }
+
+  async function saveToPhotos(blob, name) {
+    const file = new File([blob], name, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch {} }
+    else { window.open(URL.createObjectURL(blob), "_blank"); alert("Long-press the image and choose Save to Photos."); }
+  }
+
+  // ------------------------------------------------------------------ spending guard + runs
+  function confirmSpend(credits, what) {
+    const left = state.me.daily_cap - state.me.used_today;
+    return confirm(`${what}\n\nThis will use ${credits} FASHN credit${credits > 1 ? "s" : ""}.\nToday: ${state.me.used_today}/${state.me.daily_cap} used, ${left} left in the daily limit.`);
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function runAndWait(path, body, onTick) {
+    const run = await api(path, { method: "POST", body: JSON.stringify(body) });
+    setUsage(run.used_today, run.daily_cap);
+    const t0 = Date.now();
+    while (true) {
+      await sleep(3000);
+      const s = await api("/status?id=" + encodeURIComponent(run.id));
+      if (s.status === "completed") return { ...s.result, credits: run.credits };
+      if (s.status === "failed") throw new Error("FASHN failed: " + (s.error?.name || "") + " " + (s.error?.message || "") + " (not charged)");
+      onTick && onTick(`${s.status.replace("_", " ")}… ${Math.round((Date.now() - t0) / 1000)}s`);
+      if (Date.now() - t0 > 240000) throw new Error("Timed out waiting for FASHN — check My Photos in a minute.");
+    }
+  }
+  function note(id, text, err) { const el = $(id); if (!el) return; el.innerHTML = (text && !err && /…/.test(text) ? '<span class="spinner"></span> ' : "") + esc(text); el.className = "msg " + (err ? "err" : "ok"); }
+
+  // ------------------------------------------------------------------ sheets
+  function openSheet(html) { $("sheetBody").innerHTML = html; $("sheet").classList.add("open"); $("sheetBg").classList.add("open"); fillImgs($("sheetBody")); }
+  function closeSheet() { $("sheet").classList.remove("open"); $("sheetBg").classList.remove("open"); $("sheetBody").innerHTML = ""; }
+  $("sheetBg").addEventListener("click", closeSheet);
+
+  // ------------------------------------------------------------------ tabs
+  document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  function showTab(t) {
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
+    ["selfies", "clothing", "tryon", "photos", "outfits"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
+    window.scrollTo(0, 0);
+  }
+
+  // ================================================================== SELFIES
+  function renderSelfies() {
+    const g = $("selfieGrid");
+    g.innerHTML = `<button class="tile add" id="addSelfie">+ Add selfie</button>` +
+      state.selfies.map((s) => `<button class="tile" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""><span class="cap">${esc(s.label || "")}</span></button>`).join("");
+    $("addSelfie").addEventListener("click", () => $("selfieFile").click());
+    g.querySelectorAll(".tile[data-id]").forEach((t) => t.addEventListener("click", () => selfieSheet(t.dataset.id)));
+    fillImgs(g);
+  }
+  $("selfieFile").addEventListener("change", async (e) => {
+    for (const f of e.target.files) await addSelfieFromBlob(f, "");
+    e.target.value = ""; await loadAll();
+  });
+  async function addSelfieFromBlob(blob, label) {
+    const id = crypto.randomUUID(), base = `${state.uid}/selfies/${id}`;
+    const [full, thumb] = await Promise.all([shrink(blob, 1600), shrink(blob, 480, "image/jpeg", 0.8)]);
+    await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
+    const { error } = await sb.from("selfies").insert({ id, path: base + ".jpg", thumb_path: base + "_t.jpg", label });
+    if (error) throw new Error(error.message);
+  }
+  function selfieSheet(id) {
+    const s = state.selfies.find((x) => x.id === id); if (!s) return;
+    openSheet(`<img class="big" data-path="${esc(s.path)}" alt="">
+      <div class="stack" style="margin-top:12px">
+        <button class="btn" id="sUse">Use in Try-On</button>
+        <button class="btn secondary" id="sSave">Save to Photos</button>
+        <button class="btn danger" id="sDel">Delete</button></div>`);
+    $("sUse").onclick = () => { state.sel.selfie = s.id; closeSheet(); renderPickers(); showTab("tryon"); };
+    $("sSave").onclick = async () => saveToPhotos(await blobOf(s.path), "selfie.jpg");
+    $("sDel").onclick = async () => { if (!confirm("Delete this selfie?")) return; await removeFiles([s.path, s.thumb_path]); await sb.from("selfies").delete().eq("id", s.id); closeSheet(); await loadAll(); };
+  }
+
+  // ================================================================== CLOTHING
+  const CATS = ["tops", "bottoms", "one-pieces", "shoes", "bag", "accessory", "other"];
+  function renderGarments() {
+    const g = $("garmentGrid");
+    g.innerHTML = `<button class="tile add" id="addGarment">+ Add clothing</button>` +
+      state.garments.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.thumb_path || x.path)}" alt=""><span class="cap">${esc(x.name)}</span></button>`).join("");
+    $("addGarment").addEventListener("click", garmentForm);
+    g.querySelectorAll(".tile[data-id]").forEach((t) => t.addEventListener("click", () => garmentSheet(t.dataset.id)));
+    fillImgs(g);
+  }
+  function garmentFields(x = {}) {
+    return `<div><label>Name</label><input type="text" id="gName" value="${esc(x.name)}" placeholder="Black ribbed bodysuit"></div>
+      <div class="row"><div><label>Brand</label><input type="text" id="gBrand" value="${esc(x.brand)}"></div>
+      <div><label>Type</label><select id="gCat">${CATS.map((c) => `<option ${x.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div></div>
+      <div><label>Amazon affiliate link</label><input type="url" id="gUrl" value="${esc(x.affiliate_url)}" placeholder="https://amzn.to/…" inputmode="url"></div>
+      <div><label>Notes</label><textarea id="gNotes">${esc(x.notes)}</textarea></div>`;
+  }
+  function readGarmentFields() { return { name: $("gName").value.trim(), brand: $("gBrand").value.trim(), category: $("gCat").value, affiliate_url: $("gUrl").value.trim(), notes: $("gNotes").value.trim() }; }
+  function garmentForm() {
+    openSheet(`<h3>Add clothing</h3><div class="stack">
+      <div><label>Product photo</label><input type="file" id="gFile" accept="image/*"></div>${garmentFields()}
+      <button class="btn" id="gSave">Save</button><div id="gMsg" class="msg err"></div></div>`);
+    $("gSave").onclick = async () => {
+      const f = $("gFile").files[0]; if (!f) { $("gMsg").textContent = "Choose a photo first."; return; }
+      $("gSave").disabled = true;
+      try {
+        const id = crypto.randomUUID(), base = `${state.uid}/garments/${id}`;
+        const [full, thumb] = await Promise.all([shrink(f, 1600), shrink(f, 480, "image/jpeg", 0.8)]);
+        await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
+        const { error } = await sb.from("garments").insert({ id, path: base + ".jpg", thumb_path: base + "_t.jpg", ...readGarmentFields() });
+        if (error) throw new Error(error.message);
+        closeSheet(); await loadAll();
+      } catch (e) { $("gMsg").textContent = e.message; $("gSave").disabled = false; }
+    };
+  }
+  function garmentSheet(id) {
+    const x = state.garments.find((g) => g.id === id); if (!x) return;
+    const a = state.me.actions;
+    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Original</button>${x.cutout_path ? '<button class="chip" data-v="cutout_path">Extracted</button>' : ""}</div>
+      <img class="big" id="gImg" data-path="${esc(x.path)}" alt="">
+      <div class="stack" style="margin-top:12px">${garmentFields(x)}
+        <button class="btn" id="gUpdate">Save changes</button>
+        <button class="btn secondary" id="gTry">Try on</button>
+        <button class="btn secondary" id="gExtract">Extract clothing only · ${a.extract} credit</button>
+        <button class="btn secondary" id="gBg" ${x.cutout_path ? "" : "disabled"}>Make background transparent · ${a.bgremove} credit</button>
+        ${x.affiliate_url ? `<a class="btn secondary" href="${esc(x.affiliate_url)}" target="_blank" rel="noopener">Open Amazon link</a>` : ""}
+        <button class="btn danger" id="gDel">Delete</button><div id="gMsg" class="msg"></div></div>`);
+    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => {
+      $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("gImg").src = await url(x[c.dataset.v]); });
+    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
+    $("gTry").onclick = () => { state.sel.garment = x.id; closeSheet(); renderPickers(); showTab("tryon"); };
+    $("gExtract").onclick = () => spendAction("/extract", a.extract, "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
+    $("gBg").onclick = () => spendAction("/bgremove", a.bgremove, "Remove the background from the extracted clothing (transparent PNG).", x);
+    $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await removeFiles([x.path, x.thumb_path, x.cutout_path]); await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
+  }
+  async function spendAction(path, credits, what, x) {
+    if (!confirmSpend(credits, what)) return;
+    try { note("gMsg", "Starting…"); const r = await runAndWait(path, { garment_id: x.id }, (t) => note("gMsg", t));
+      state.urls.delete(r.cutout_path); note("gMsg", `Done — ${r.credits} credit used.`); await loadAll(); garmentSheet(x.id); note("gMsg", "Done. See the Extracted tab above.");
+    } catch (e) { note("gMsg", e.message, true); }
+  }
+
+  // ================================================================== TRY-ON
+  function renderPickers() {
+    const ps = $("pickSelfie"), pg = $("pickGarment");
+    ps.innerHTML = state.selfies.map((s) => `<button class="tile ${state.sel.selfie === s.id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""></button>`).join("") || '<div class="empty">Add a selfie first</div>';
+    pg.innerHTML = state.garments.map((g) => `<button class="tile ${state.sel.garment === g.id ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first</div>';
+    ps.querySelectorAll(".tile").forEach((t) => t.onclick = () => { state.sel.selfie = t.dataset.id; renderPickers(); });
+    pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => { state.sel.garment = t.dataset.id; state.sel.src = "path"; renderPickers(); });
+    const g = state.garments.find((x) => x.id === state.sel.garment);
+    $("srcRow").classList.toggle("hidden", !(g && g.cutout_path));
+    $("srcRow").querySelectorAll(".chip").forEach((c) => { c.classList.toggle("on", c.dataset.src === state.sel.src); c.onclick = () => { state.sel.src = c.dataset.src; renderPickers(); }; });
+    $("generate").disabled = !(state.sel.selfie && state.sel.garment);
+    fillImgs(ps); fillImgs(pg);
+  }
+  function togglePresetOpts() { const isMax = $("preset").value.startsWith("max"); $("v16opts").classList.toggle("hidden", isMax); $("maxopts").classList.toggle("hidden", !isMax); }
+  $("preset").addEventListener("change", togglePresetOpts);
+  $("generate").addEventListener("click", async () => {
+    const s = state.selfies.find((x) => x.id === state.sel.selfie), g = state.garments.find((x) => x.id === state.sel.garment);
+    const p = state.me.presets[$("preset").value];
+    if (!confirmSpend(p.credits, `Try on "${g.name}" (${p.label}).`)) return;
+    $("generate").disabled = true; $("result").classList.add("hidden"); note("runMsg", "Starting…");
+    try {
+      const r = await runAndWait("/run", { preset: $("preset").value, selfie_path: s.path,
+        garment_path: state.sel.src === "cutout" && g.cutout_path ? g.cutout_path : g.path,
+        category: $("category").value, garment_photo_type: $("gpt").value, prompt: $("prompt").value.trim() || undefined,
+        meta: { kind: "tryon", selfie_id: s.id, garment_id: g.id } }, (t) => note("runMsg", t));
+      $("out").src = await url(r.path); $("result").classList.remove("hidden"); note("runMsg", `Done — ${r.credits} credit(s) used. Saved to My Photos.`);
+      $("saveOut").onclick = async () => saveToPhotos(await blobOf(r.path), "closetiq-studio.jpg");
+      $("reuseOut").onclick = async () => { await addSelfieFromBlob(await blobOf(r.path), g.name); await loadAll(); alert("Added to My Selfies."); };
+      loadAll();
+    } catch (e) { note("runMsg", e.message, true); }
+    $("generate").disabled = false;
+  });
+
+  // ================================================================== PHOTOS
+  function renderPhotos() {
+    const g = $("genGrid");
+    g.innerHTML = state.generations.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.path)}" loading="lazy" alt=""></button>`).join("") || '<div class="empty">Nothing generated yet.</div>';
+    g.querySelectorAll(".tile").forEach((t) => t.onclick = () => photoSheet(t.dataset.id));
+    fillImgs(g);
+  }
+  function photoSheet(id) {
+    const x = state.generations.find((p) => p.id === id); if (!x) return;
+    const g = state.garments.find((q) => q.id === x.garment_id), o = state.outfits.find((q) => q.id === x.outfit_id);
+    openSheet(`<img class="big" data-path="${esc(x.path)}" alt="">
+      <p class="kv" style="margin:8px 0">${esc(new Date(x.created_at).toLocaleString())} · ${esc(x.preset || x.kind)} · ${x.credits} credit(s)${g ? " · " + esc(g.name) : ""}${o ? " · " + esc(o.name) : ""}</p>
+      <div class="stack"><button class="btn" id="pSave">Save to Photos</button>
+        <button class="btn secondary" id="pReuse">Use as selfie</button>
+        ${o ? '<button class="btn secondary" id="pHero">Set as outfit cover</button>' : ""}
+        <button class="btn danger" id="pDel">Delete</button></div>`);
+    $("pSave").onclick = async () => saveToPhotos(await blobOf(x.path), "closetiq-studio.jpg");
+    $("pReuse").onclick = async () => { await addSelfieFromBlob(await blobOf(x.path), g ? g.name : ""); await loadAll(); alert("Added to My Selfies."); };
+    if (o) $("pHero").onclick = async () => { await sb.from("outfits").update({ hero_generation_id: x.id }).eq("id", o.id); await loadAll(); closeSheet(); };
+    $("pDel").onclick = async () => { if (!confirm("Delete this photo?")) return; await removeFiles([x.path]); await sb.from("generations").delete().eq("id", x.id); closeSheet(); await loadAll(); };
+  }
+
+  // ================================================================== OUTFITS
+  function renderOutfits() {
+    const list = $("outfitList");
+    list.innerHTML = state.outfits.map((o) => {
+      const hero = state.generations.find((g) => g.id === o.hero_generation_id);
+      const items = o.items.map((id) => state.garments.find((g) => g.id === id)).filter(Boolean);
+      return `<button class="card row" data-id="${o.id}" style="text-align:left;cursor:pointer">
+        <div style="flex:0 0 64px"><div class="tile" style="width:64px"><img data-path="${esc(hero ? hero.path : (items[0]?.thumb_path || ""))}" alt=""></div></div>
+        <div><strong>${esc(o.name)}</strong><div class="kv">${items.length} item${items.length === 1 ? "" : "s"} · ${items.filter((i) => i.affiliate_url).length} link${items.filter((i) => i.affiliate_url).length === 1 ? "" : "s"}</div></div></button>`;
+    }).join("") || '<div class="empty">No outfits yet.</div>';
+    list.querySelectorAll("[data-id]").forEach((b) => b.onclick = () => outfitSheet(b.dataset.id));
+    fillImgs(list);
+  }
+  $("newOutfit").addEventListener("click", () => outfitEditor(null));
+  function outfitEditor(o) {
+    const chosen = new Set(o ? o.items : []);
+    openSheet(`<h3>${o ? "Edit outfit" : "New outfit"}</h3><div class="stack">
+      <div><label>Name</label><input type="text" id="oName" value="${esc(o?.name || "")}" placeholder="Date night in black"></div>
+      <div><label>Caption for posts</label><textarea id="oCap" placeholder="Links below 👇">${esc(o?.caption || "")}</textarea></div>
+      <div><label>Pick clothing</label><div class="grid" id="oPick">${state.garments.map((g) => `<button class="tile ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("")}</div></div>
+      <button class="btn" id="oSave">Save outfit</button><div id="oMsg" class="msg err"></div></div>`);
+    $("oPick").querySelectorAll(".tile").forEach((t) => t.onclick = () => { chosen.has(t.dataset.id) ? chosen.delete(t.dataset.id) : chosen.add(t.dataset.id); t.classList.toggle("sel"); });
+    $("oSave").onclick = async () => {
+      const name = $("oName").value.trim() || "Untitled outfit", caption = $("oCap").value.trim();
+      let id = o?.id;
+      if (id) { await sb.from("outfits").update({ name, caption, updated_at: new Date().toISOString() }).eq("id", id); await sb.from("outfit_items").delete().eq("outfit_id", id); }
+      else { const { data, error } = await sb.from("outfits").insert({ name, caption }).select("id").single(); if (error) { $("oMsg").textContent = error.message; return; } id = data.id; }
+      const rows = [...chosen].map((gid, i) => ({ outfit_id: id, garment_id: gid, position: i }));
+      if (rows.length) { const { error } = await sb.from("outfit_items").insert(rows); if (error) { $("oMsg").textContent = error.message; return; } }
+      closeSheet(); await loadAll(); outfitSheet(id);
+    };
+  }
+  function linksText(o, items) {
+    return [o.name, o.caption, "", ...items.map((g) => `${g.name}${g.brand ? " — " + g.brand : ""}: ${g.affiliate_url || "(no link yet)"}`)].filter((l) => l !== undefined).join("\n");
+  }
+  function outfitSheet(id) {
+    const o = state.outfits.find((x) => x.id === id); if (!o) return;
+    const items = o.items.map((gid) => state.garments.find((g) => g.id === gid)).filter(Boolean);
+    const hero = state.generations.find((g) => g.id === o.hero_generation_id);
+    const p = state.me.presets;
+    openSheet(`<h3>${esc(o.name)}</h3>
+      ${hero ? `<img class="big" data-path="${esc(hero.path)}" alt="">` : ""}
+      <div class="stack" style="margin-top:10px">
+        <div class="strip">${items.map((g) => `<div class="tile"><img data-path="${esc(g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></div>`).join("")}</div>
+        <div class="card links"><strong>Links</strong><div class="kv" style="white-space:pre-wrap;margin-top:6px">${esc(linksText(o, items))}</div></div>
+        <button class="btn" id="oCopy">Copy caption + links</button>
+        <button class="btn secondary" id="oCollage">Collage builder</button>
+        <button class="btn secondary" id="oTry">Try on this outfit</button>
+        <button class="btn secondary" id="oEdit">Edit items</button>
+        <button class="btn danger" id="oDel">Delete outfit</button><div id="oMsg" class="msg"></div></div>`);
+    $("oCopy").onclick = async () => { try { await navigator.clipboard.writeText(linksText(o, items)); note("oMsg", "Copied."); } catch { note("oMsg", "Copy failed — select the text above.", true); } };
+    $("oCollage").onclick = () => collageSheet(o, items);
+    $("oTry").onclick = () => outfitTrySheet(o, items);
+    $("oEdit").onclick = () => outfitEditor(o);
+    $("oDel").onclick = async () => { if (!confirm(`Delete "${o.name}"? (Clothing and photos stay.)`)) return; await sb.from("outfits").delete().eq("id", o.id); closeSheet(); await loadAll(); };
+  }
+
+  // ---------------------------------------------------------------- outfit try-on (single-pass vs sequential)
+  function outfitTrySheet(o, items) {
+    const p = state.me.presets; const cost = (k) => p[k].credits;
+    openSheet(`<h3>Try on: ${esc(o.name)}</h3><div class="stack">
+      <div><label>Selfie</label><div class="strip" id="otSelfie">${state.selfies.map((s) => `<button class="tile ${state.sel.selfie === s.id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""></button>`).join("")}</div></div>
+      <div><label>Quality</label><select id="otPreset">${Object.entries(p).filter(([k]) => k.startsWith("max")).map(([k, v]) => `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(v.label)} · ${v.credits}/pass</option>`).join("")}</select></div>
+      <div><label>Method</label><div class="chips"><button class="chip on" data-m="single">Single pass (collage as one product)</button><button class="chip" data-m="seq">Sequential (${items.length} passes)</button></div></div>
+      <p class="hint" id="otCost"></p>
+      <button class="btn" id="otGo">Generate</button><div id="otMsg" class="msg"></div>
+      <div class="steps" id="otSteps"></div></div>`);
+    let method = "single";
+    const refresh = () => { const c = cost($("otPreset").value); $("otCost").textContent = method === "single" ? `${c} credits · one FASHN run with all items on a white collage (experimental).` : `${c * items.length} credits · ${items.length} runs, each wearing the previous result. You can stop after any step.`; };
+    $("sheetBody").querySelectorAll("[data-m]").forEach((c) => c.onclick = () => { method = c.dataset.m; $("sheetBody").querySelectorAll("[data-m]").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
+    $("otPreset").onchange = refresh; refresh();
+    $("otSelfie").querySelectorAll(".tile").forEach((t) => t.onclick = () => { state.sel.selfie = t.dataset.id; $("otSelfie").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); });
+    $("otGo").onclick = async () => {
+      const s = state.selfies.find((x) => x.id === state.sel.selfie); if (!s) { note("otMsg", "Pick a selfie.", true); return; }
+      const preset = $("otPreset").value, c = cost(preset);
+      const total = method === "single" ? c : c * items.length;
+      if (!confirmSpend(total, method === "single" ? `Single-pass outfit try-on (${items.length} items).` : `Sequential outfit try-on, ${items.length} passes.`)) return;
+      $("otGo").disabled = true; $("otSteps").innerHTML = "";
+      try {
+        if (method === "single") {
+          note("otMsg", "Building collage…");
+          const blob = await renderCollage(o, items, { bg: "#ffffff" }, 1400);
+          const r = await runAndWait("/run", { preset, selfie_path: s.path, garment_image: await toDataUrl(blob), prompt: "wear all of these items together", meta: { kind: "outfit_single", selfie_id: s.id, outfit_id: o.id } }, (t) => note("otMsg", t));
+          $("otSteps").innerHTML = `<div class="tile"><img data-path="${esc(r.path)}" alt=""></div>`; fillImgs($("otSteps"));
+          note("otMsg", `Done — ${r.credits} credits. Saved to My Photos.`);
+        } else {
+          let prev = s.path, used = 0;
+          for (let i = 0; i < items.length; i++) {
+            const g = items[i];
+            note("otMsg", `Step ${i + 1}/${items.length}: ${g.name}…`);
+            const r = await runAndWait("/run", { preset, selfie_path: prev, garment_path: g.cutout_path || g.path, meta: { kind: "outfit_step", selfie_id: s.id, garment_id: g.id, outfit_id: o.id, step: i + 1 } }, (t) => note("otMsg", `Step ${i + 1}/${items.length}: ${t}`));
+            prev = r.path; used += r.credits;
+            $("otSteps").insertAdjacentHTML("beforeend", `<div class="tile"><img data-path="${esc(r.path)}" alt=""><span class="cap">${i + 1}. ${esc(g.name)}</span></div>`); fillImgs($("otSteps"));
+            if (i < items.length - 1 && !confirm(`Step ${i + 1} done. Continue with "${items[i + 1].name}" (${c} more credits)?`)) break;
+          }
+          note("otMsg", `Done — ${used} credits. All steps saved to My Photos.`);
+        }
+        loadAll();
+      } catch (e) { note("otMsg", e.message, true); }
+      $("otGo").disabled = false;
+    };
+    fillImgs($("sheetBody"));
+  }
+
+  // ---------------------------------------------------------------- collage builder
+  const BGS = { white: "#ffffff", ivory: "#f6efe4", blush: "#f3e3dd", sage: "#e3e9df", charcoal: "#2a2724", gradient: "linear-gradient(160deg,#f7efe3,#e9d7c3)" };
+  async function collageSheet(o, items) {
+    const layout = o.layout && o.layout.boxes ? JSON.parse(JSON.stringify(o.layout)) : defaultLayout(items);
+    openSheet(`<h3>Collage · ${esc(o.name)}</h3>
+      <div class="stage" id="stage"></div>
+      <div class="stack" style="margin-top:10px">
+        <div><label>Background</label><div class="chips" id="bgChips">${Object.keys(BGS).map((k) => `<button class="chip ${layout.bg === k ? "on" : ""}" data-bg="${k}">${k}</button>`).join("")}</div></div>
+        <div id="selTools" class="row hidden">
+          <button class="btn secondary small" id="tSmaller">Smaller</button><button class="btn secondary small" id="tBigger">Bigger</button>
+          <button class="btn secondary small" id="tFront">Front</button><button class="btn secondary small" id="tBack">Back</button>
+          <button class="btn danger small" id="tRemove">Remove</button></div>
+        <div><label>Add / restore item</label><div class="chips" id="itemChips">${items.map((g) => `<button class="chip" data-g="${g.id}">${esc(g.name)}</button>`).join("")}</div></div>
+        <div class="row"><button class="btn" id="cSave">Save layout</button><button class="btn secondary" id="cExport">Export image</button></div>
+        <div id="cMsg" class="msg"></div></div>`);
+    const stage = $("stage"); let selected = null; const srcs = {};
+    for (const g of items) srcs[g.id] = await url(g.cutout_path || g.path);
+    function draw() {
+      stage.style.background = BGS[layout.bg] || BGS.white; stage.innerHTML = "";
+      const W = stage.clientWidth, H = stage.clientHeight;
+      layout.boxes.forEach((b, i) => {
+        const el = document.createElement("div"); el.className = "box" + (selected === i ? " sel" : ""); el.dataset.i = i;
+        el.style.left = b.x * W + "px"; el.style.top = b.y * H + "px"; el.style.width = b.w * W + "px"; el.style.zIndex = i + 1;
+        const im = document.createElement("img"); im.src = srcs[b.g] || ""; im.style.position = "static"; im.style.width = "100%"; im.style.display = "block"; im.draggable = false;
+        el.appendChild(im); stage.appendChild(el);
+        attachDrag(el, i);
+      });
+      $("selTools").classList.toggle("hidden", selected === null);
+      $("bgChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.bg === layout.bg));
+    }
+    function attachDrag(el, i) {
+      const pts = new Map(); let start = null;
+      el.addEventListener("pointerdown", (e) => { el.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); selected = i; draw(); start = { ...layout.boxes[i], pts: new Map(pts) }; e.preventDefault(); });
+      el.addEventListener("pointermove", (e) => {
+        if (!pts.has(e.pointerId) || !start) return; pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const W = stage.clientWidth, H = stage.clientHeight, b = layout.boxes[i]; const cur = $("stage").querySelector(`[data-i="${i}"]`); if (!cur) return;
+        if (pts.size === 1) { const p0 = [...start.pts.values()][0], p = [...pts.values()][0]; b.x = start.x + (p.x - p0.x) / W; b.y = start.y + (p.y - p0.y) / H; }
+        else { const [a0, b0] = [...start.pts.values()], [a1, b1] = [...pts.values()]; const d0 = Math.hypot(a0.x - b0.x, a0.y - b0.y) || 1, d1 = Math.hypot(a1.x - b1.x, a1.y - b1.y); b.w = Math.min(1.5, Math.max(0.1, start.w * d1 / d0)); }
+        cur.style.left = b.x * W + "px"; cur.style.top = b.y * H + "px"; cur.style.width = b.w * W + "px";
+      });
+      const up = (e) => { pts.delete(e.pointerId); if (!pts.size) start = null; };
+      el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+    }
+    $("bgChips").querySelectorAll(".chip").forEach((c) => c.onclick = () => { layout.bg = c.dataset.bg; draw(); });
+    $("itemChips").querySelectorAll(".chip").forEach((c) => c.onclick = () => { layout.boxes.push({ g: c.dataset.g, x: 0.3, y: 0.3, w: 0.4 }); selected = layout.boxes.length - 1; draw(); });
+    $("tSmaller").onclick = () => { if (selected != null) { layout.boxes[selected].w = Math.max(0.1, layout.boxes[selected].w * 0.85); draw(); } };
+    $("tBigger").onclick = () => { if (selected != null) { layout.boxes[selected].w = Math.min(1.5, layout.boxes[selected].w * 1.18); draw(); } };
+    $("tFront").onclick = () => { if (selected != null) { const [b] = layout.boxes.splice(selected, 1); layout.boxes.push(b); selected = layout.boxes.length - 1; draw(); } };
+    $("tBack").onclick = () => { if (selected != null) { const [b] = layout.boxes.splice(selected, 1); layout.boxes.unshift(b); selected = 0; draw(); } };
+    $("tRemove").onclick = () => { if (selected != null) { layout.boxes.splice(selected, 1); selected = null; draw(); } };
+    stage.addEventListener("pointerdown", (e) => { if (e.target === stage) { selected = null; draw(); } });
+    $("cSave").onclick = async () => { const { error } = await sb.from("outfits").update({ layout, updated_at: new Date().toISOString() }).eq("id", o.id); note("cMsg", error ? error.message : "Layout saved.", !!error); if (!error) loadAll(); };
+    $("cExport").onclick = async () => { note("cMsg", "Rendering…"); const blob = await renderCollage(o, items, layout, 2160); await saveToPhotos(blob, `${o.name.replace(/\W+/g, "-")}-collage.jpg`); note("cMsg", ""); };
+    draw();
+  }
+  function defaultLayout(items) {
+    const n = items.length, cols = n <= 2 ? n : n <= 4 ? 2 : 3, rows = Math.ceil(n / cols), w = 0.9 / cols;
+    return { bg: "ivory", boxes: items.map((g, i) => ({ g: g.id, x: 0.05 + (i % cols) * w + w * 0.05, y: 0.05 + Math.floor(i / cols) * (0.9 / rows) + 0.02, w: w * 0.9 })) };
+  }
+  async function renderCollage(o, items, layout, W) {
+    const H = Math.round(W * 1.25), c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d");
+    const bg = BGS[layout.bg] || layout.bg || "#ffffff";
+    if (bg.startsWith("linear")) { const gr = ctx.createLinearGradient(0, 0, W, H); gr.addColorStop(0, "#f7efe3"); gr.addColorStop(1, "#e9d7c3"); ctx.fillStyle = gr; } else ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    const boxes = layout.boxes || defaultLayout(items).boxes;
+    for (const b of boxes) {
+      const g = items.find((x) => x.id === b.g); if (!g) continue;
+      const img = await loadImg(URL.createObjectURL(await blobOf(g.cutout_path || g.path)));
+      const w = b.w * W, h = w * img.height / img.width; ctx.drawImage(img, b.x * W, b.y * H, w, h);
+    }
+    return await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+  }
+
+  // ------------------------------------------------------------------ account (header tap)
+  $("usage").parentElement.querySelector("h1").addEventListener("click", () => {
+    openSheet(`<h3>Account</h3><div class="stack"><p class="kv">${esc(state.me?.email || "")} · limit ${state.me?.daily_cap} credits/day (${esc(state.me?.tz || "")})</p>
+      <div><label>New password (12+ characters)</label><input id="newpw" type="password" autocomplete="new-password" minlength="12"></div>
+      <button class="btn secondary" id="changepw">Change password</button>
+      <button class="btn secondary" id="logout">Sign out</button><div id="acctMsg" class="msg"></div></div>`);
+    $("changepw").onclick = async () => { const pw = $("newpw").value; if (pw.length < 12) { note("acctMsg", "12+ characters, please.", true); return; } const { error } = await sb.auth.updateUser({ password: pw }); note("acctMsg", error ? error.message : "Password changed.", !!error); };
+    $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+  });
+})();
+</script>
+</body>
+</html>
