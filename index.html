@@ -134,9 +134,11 @@
   <section id="tab-clothing" class="hidden">
     <h2>My Clothing</h2>
     <p class="hint">Clean product images with names and affiliate links.</p>
+    <div class="row" style="margin-bottom:8px"><button class="btn" id="amazonSearch">Search Amazon</button><button class="btn secondary" id="amazonLink">Add from Amazon link</button></div>
     <div class="row" style="margin-bottom:10px"><button class="btn secondary" id="collageFromClothing">Make a collage from clothing</button></div>
     <div class="grid" id="garmentGrid"></div>
     <input id="garmentFile" type="file" accept="image/*" class="hidden">
+    <input id="amazonFile" type="file" accept="image/*" class="hidden">
   </section>
 
   <section id="tab-tryon" class="hidden">
@@ -467,6 +469,32 @@
   }
   $("garmentFile").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) importWizard(f); });
   $("collageFromClothing").addEventListener("click", () => newCollageSheet(null));
+
+  // --- Amazon: search in Amazon's own app/site, then import by pasted link (no scraping, no unofficial image fetch).
+  // Ready for the Creators API later: an API import would fill the same garments columns (asin, product_url,
+  // affiliate_url, name, brand, path) — nothing in the library changes shape.
+  $("amazonSearch").addEventListener("click", () => {
+    const q = prompt("Search Amazon Fashion for…", ""); if (q == null) return;
+    window.open("https://www.amazon.com/s?i=fashion&k=" + encodeURIComponent(q.trim()), "_blank");
+    amazonLinkSheet("", true);
+  });
+  $("amazonLink").addEventListener("click", () => amazonLinkSheet("", false));
+  let pendingAmazon = null;
+  function amazonLinkSheet(prefill, afterSearch) {
+    openSheet(`<h3>Add from Amazon link</h3>
+      <p class="hint">${afterSearch ? "Amazon opened in a new tab. On the product: <b>Share → Copy link</b>, then come back here and paste it." : "On the product page in Amazon: <b>Share → Copy link</b>, then paste it below."}</p>
+      <div class="stack">
+        <div><label>Amazon product link</label><input type="url" id="alUrl" value="${esc(prefill)}" placeholder="Paste the link here" inputmode="url" autocapitalize="none"><div class="kv" id="alNote" style="margin-top:4px"></div></div>
+        <div class="row"><button class="btn secondary small" id="alPaste">Paste from clipboard</button></div>
+        <p class="hint">Next, add the product photo: take a <b>screenshot</b> of the product in Amazon (or choose a saved photo). The importer lets you frame just the product and clean it up.</p>
+        <button class="btn" id="alPhoto" disabled>Choose photo / screenshot</button>
+        <div id="alMsg" class="msg"></div></div>`);
+    const check = () => { const t = tagAmazon($("alUrl").value, state.settings.amazon_tag); $("alNote").textContent = t.note; $("alPhoto").disabled = !$("alUrl").value.trim(); return t; };
+    $("alUrl").oninput = check; check();
+    $("alPaste").onclick = async () => { try { $("alUrl").value = (await navigator.clipboard.readText()).trim(); check(); } catch { note("alMsg", "Clipboard access was blocked — long-press the field and choose Paste.", true); } };
+    $("alPhoto").onclick = () => { pendingAmazon = { url: $("alUrl").value.trim() }; $("amazonFile").click(); };
+  }
+  $("amazonFile").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; const p = pendingAmazon; pendingAmazon = null; if (f) { closeSheet(); importWizard(f, p || {}); } });
   function garmentFields(x = {}) {
     return `<div><label>Name</label><input type="text" id="gName" value="${esc(x.name)}" placeholder="Black ribbed bodysuit"></div>
       <div class="row"><div><label>Brand</label><input type="text" id="gBrand" value="${esc(x.brand)}"></div>
@@ -500,7 +528,7 @@
   // The crop frame is measured against the DISPLAYED image, so the saved crop always matches what you see.
   function closeImporter() { $("importer").classList.add("hidden"); $("iwBody").innerHTML = ""; document.body.style.overflow = ""; }
   $("iwClose").onclick = closeImporter;
-  async function importWizard(file) {
+  async function importWizard(file, prefill = {}) {
     const srcUrl = URL.createObjectURL(file); const info = await looksClean(file);
     const start = info.ratio > 1.8 ? { x: 0.08, y: 0.18, w: 0.84, h: 0.5 } : { x: 0, y: 0, w: 1, h: 1 };
     let crop = { ...start }, cutout = null, cutoutPath = null, seed = 42;
@@ -513,6 +541,7 @@
       ${garmentFields()}
       <div id="iwMsg" class="msg"></div>`;
     $("iwExtract").textContent = `Extract clothing · ${cost("extract")} credit`; $("iwExtract").disabled = info.clean; $("iwSave").disabled = false; $("iwSave").textContent = "Save to My Clothing";
+    if (prefill.url) { $("gUrl").value = prefill.url; $("gUrlNote").textContent = tagAmazon(prefill.url, state.settings.amazon_tag).note; }
     $("importer").classList.remove("hidden"); $("importer").scrollTop = 0; document.body.style.overflow = "hidden";
 
     const wrap = $("cropWrap"), box = $("cropBox"), img = $("cropImg");
