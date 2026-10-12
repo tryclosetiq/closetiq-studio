@@ -6,3 +6,4 @@ project behind authentication; AI calls go through a server-side function that h
 
 Nothing personal is stored here: the page contains only the Supabase project URL and its public
 anon key, which grant no access on their own.
+Phase 2 deployment update
