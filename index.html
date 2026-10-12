@@ -87,6 +87,9 @@
   @media (prefers-reduced-motion:no-preference){.spinner{animation:spin .9s linear infinite}}
   @keyframes spin{to{transform:rotate(360deg)}}
   .steps{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .tab{min-width:0}
+  .rlt{flex:0 0 72px;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:var(--soft);border:0;padding:0;background-size:cover;background-position:center}
+  .rlt.sel{outline:3px solid var(--ring);outline-offset:-3px}
   /* ---- clothing importer (full screen) + crop tool ---- */
   #importer{position:fixed;inset:0;z-index:30;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch;padding:calc(8px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
   .cropWrap{position:relative;display:flex;justify-content:center;align-items:center;width:100%;max-height:52dvh;background:#111;border-radius:12px;overflow:hidden;user-select:none;-webkit-user-select:none}
@@ -201,6 +204,28 @@
     <div class="grid" id="genGrid"></div>
   </section>
 
+  <section id="tab-reels" class="hidden">
+    <h2>Reels</h2>
+    <p class="hint">Pick a saved outfit, choose a template, preview, render — a vertical 9:16 reel with a Shop the Look ending. Free, made on your phone.</p>
+    <div class="card stack">
+      <div><label>Outfit</label><div class="strip" id="rlOutfits"></div></div>
+      <div><label>Template</label><div class="chips" id="rlTemplates"></div></div>
+      <div class="row"><div><label>Length</label><div class="chips" id="rlDur"><button class="chip on" data-d="10">10 s</button><button class="chip" data-d="15">15 s</button><button class="chip" data-d="30">30 s</button></div></div></div>
+      <div><label>Theme</label><div class="strip" id="rlThemes"></div></div>
+      <div id="rlHeroRow" class="hidden"><label>Hero photo (Mirror)</label><div class="strip" id="rlHero"></div></div>
+      <div><label>Caption line on video (optional)</label><input type="text" id="rlCaption" placeholder="Everything linked ↓" maxlength="60"></div>
+      <div id="rlPreviewWrap" class="hidden"><canvas id="rlPreview" style="width:100%;border-radius:14px;background:#000;display:block"></canvas></div>
+      <div class="row"><button class="btn secondary" id="rlPreviewBtn" disabled>Preview</button><button class="btn" id="rlRender" disabled>Render video</button></div>
+      <div id="rlMsg" class="msg"></div>
+      <div id="rlResult" class="hidden stack">
+        <video id="rlVideo" controls playsinline style="width:100%;border-radius:14px;background:#000"></video>
+        <div class="row"><button class="btn" id="rlSave">Save reel</button><button class="btn secondary" id="rlDownload">Save to Photos</button></div>
+      </div>
+    </div>
+    <h3>Saved reels</h3>
+    <div class="grid" id="rlGrid"></div>
+  </section>
+
   <section id="tab-outfits" class="hidden">
     <h2>Saved Outfits</h2>
     <p class="hint">Group clothing into outfits and keep the links together.</p>
@@ -217,6 +242,7 @@
   <button class="tab" data-tab="collages"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="12" rx="1.5"/><rect x="15" y="3" width="6" height="7" rx="1.5"/><rect x="15" y="12" width="6" height="9" rx="1.5"/><rect x="3" y="17" width="10" height="4" rx="1.5"/></svg>Collages</button>
   <button class="tab" data-tab="photos"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>Photos</button>
   <button class="tab" data-tab="outfits"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>Outfits</button>
+  <button class="tab" data-tab="reels"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M10 9l5 3-5 3z"/></svg>Reels</button>
 </nav>
 
 <div class="sheet-bg" id="sheetBg"></div>
@@ -323,6 +349,173 @@ const BG_DESIGNS = (() => {
 
 </script>
 <script>
+// Reel engine — renders a 1080×1920 outfit reel on a canvas from a plain "spec", previews it live,
+// and records it to MP4 (Safari/iOS) or WebM (other browsers) with MediaRecorder. No servers, no cost.
+// (Inlined into index.html; kept here for review and for the test harness.)
+// Reel engine — renders a 1080×1920 outfit reel on a canvas from a plain "spec", previews it live,
+// and records it to MP4 (Safari/iOS) or WebM (other browsers) with MediaRecorder. No servers, no cost.
+// (Inlined into index.html; kept here for review and for the test harness.)
+const ReelEngine = (() => {
+  const W = 1080, H = 1920;
+  const ease = { out: (t) => 1 - Math.pow(1 - t, 3), inOut: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2), back: (t) => { const c = 1.70158; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); } };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1);          // 0..1 progress of t inside [a,b]
+  const SERIF = '"Fraunces", Georgia, serif', SANS = '"Inter Tight", system-ui, sans-serif';
+
+  // ---- images: fit/cover helpers (cutouts are drawn "contain" with a soft shadow) ----
+  function drawFit(ctx, img, cx, cy, w, h, { shadow = true, alpha = 1, rot = 0, scale = 1 } = {}) {
+    if (!img) return; const r = Math.min(w / img.width, h / img.height) * scale; const dw = img.width * r, dh = img.height * r;
+    ctx.save(); ctx.globalAlpha = alpha; ctx.translate(cx, cy); ctx.rotate(rot);
+    if (shadow) { ctx.shadowColor = "rgba(0,0,0,.22)"; ctx.shadowBlur = 40; ctx.shadowOffsetY = 18; }
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh); ctx.restore();
+  }
+  function drawCover(ctx, img, x, y, w, h, zoom = 1) {
+    if (!img) return; const r = Math.max(w / img.width, h / img.height) * zoom; const dw = img.width * r, dh = img.height * r;
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh); ctx.restore();
+  }
+  function text(ctx, str, x, y, { size = 60, font = SANS, weight = 600, color = "#1c1915", align = "center", alpha = 1, letter = 0, maxWidth = W - 160 } = {}) {
+    ctx.save(); ctx.globalAlpha = alpha; ctx.font = `${weight} ${size}px ${font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = "middle";
+    if (letter) ctx.letterSpacing = `${letter}px`;
+    // naive shrink-to-fit
+    let s = size; while (s > 20 && ctx.measureText(str).width > maxWidth) { s -= 2; ctx.font = `${weight} ${s}px ${font}`; }
+    ctx.fillText(str, x, y); ctx.restore();
+  }
+  function pill(ctx, str, x, y, { size = 34, pad = 22, bg = "rgba(255,255,255,.92)", color = "#1c1915", alpha = 1 } = {}) {
+    ctx.save(); ctx.globalAlpha = alpha; ctx.font = `600 ${size}px ${SANS}`; const w = ctx.measureText(str).width + pad * 2, h = size + pad;
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+    ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(str, x, y + 1); ctx.restore();
+  }
+  function card(ctx, x, y, w, h, alpha = 1, r = 36) { ctx.save(); ctx.globalAlpha = alpha; ctx.shadowColor = "rgba(0,0,0,.18)"; ctx.shadowBlur = 50; ctx.shadowOffsetY = 20; ctx.fillStyle = "#fffdf9"; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); ctx.restore(); }
+
+  // ---- layouts ----
+  function gridSlots(n, top, bottom, left = 110, right = 110) {
+    const cols = n <= 2 ? n : n <= 4 ? 2 : 3, rows = Math.ceil(n / cols), cw = (W - left - right) / cols, ch = (bottom - top) / rows; const out = [];
+    for (let i = 0; i < n; i++) out.push({ cx: left + (i % cols + 0.5) * cw, cy: top + (Math.floor(i / cols) + 0.5) * ch, w: cw * 0.86, h: ch * 0.86 });
+    return out;
+  }
+
+  // ---- the Shop the Look ending (shared by all templates) ----
+  function endCard(ctx, t, spec, A) {       // t: 0..1 progress inside the end segment
+    const p = ease.out(seg(t, 0, 0.35)); ctx.save(); ctx.globalAlpha = p; ctx.fillStyle = "rgba(255,253,249,.80)"; ctx.fillRect(0, 0, W, H); ctx.restore();
+    text(ctx, "Shop the Look", W / 2, 230 + (1 - p) * 40, { size: 96, font: SERIF, weight: 600, alpha: p });
+    text(ctx, spec.title, W / 2, 330, { size: 40, weight: 500, color: "#6e665c", alpha: p });
+    const items = spec.items.slice(0, 5), slots = gridSlots(items.length, 420, 1380);
+    items.forEach((it, i) => { const q = ease.back(seg(t, 0.15 + i * 0.08, 0.55 + i * 0.08)); const s = slots[i];
+      card(ctx, s.cx - s.w / 2, s.cy - s.h / 2, s.w, s.h, q); drawFit(ctx, A.items[i], s.cx, s.cy - 30, s.w * 0.78, s.h * 0.62, { alpha: q, scale: q });
+      text(ctx, it.name, s.cx, s.cy + s.h / 2 - 70, { size: 30, weight: 600, alpha: q, maxWidth: s.w - 40 });
+      if (it.price) pill(ctx, it.price, s.cx, s.cy + s.h / 2 - 20, { size: 26, alpha: q, bg: "#1c1915", color: "#fffaf0" }); });
+    const q2 = ease.out(seg(t, 0.6, 0.85));
+    pill(ctx, spec.cta || "Links in bio", W / 2, 1520, { size: 44, pad: 34, bg: "#1c1915", color: "#fffaf0", alpha: q2 });
+    text(ctx, spec.disclosure, W / 2, 1660, { size: 26, weight: 500, color: "#6e665c", alpha: q2, maxWidth: W - 200 });
+    if (spec.handle) text(ctx, spec.handle, W / 2, 1740, { size: 30, weight: 600, color: "#1c1915", alpha: q2 });
+  }
+
+  // ---- templates: draw(ctx, t seconds, spec, assets, D duration) ----
+  const T = {};
+  // 1. Reveal — pieces fly in from alternating sides, settle into a grid; title slides in.
+  T.reveal = (ctx, t, spec, A, D) => {
+    const n = A.items.length, endAt = D - 4, per = (endAt - 2.2) / Math.max(n, 1), slots = gridSlots(n, 520, 1560);
+    text(ctx, spec.title, W / 2, 300 + (1 - ease.out(seg(t, 0.2, 1))) * 60, { size: 88, font: SERIF, alpha: ease.out(seg(t, 0.2, 1)) });
+    text(ctx, spec.subtitle, W / 2, 400, { size: 36, color: "#6e665c", alpha: ease.out(seg(t, 0.6, 1.4)) });
+    A.items.forEach((img, i) => { const a = 1.4 + i * per, p = ease.back(seg(t, a, a + 0.9)); if (p <= 0) return; const s = slots[i]; const from = i % 2 ? W + 400 : -400;
+      drawFit(ctx, img, from + (s.cx - from) * p, s.cy - (1 - p) * 120, s.w, s.h, { rot: (1 - p) * (i % 2 ? 0.5 : -0.5), scale: 0.6 + 0.4 * p });
+      pill(ctx, spec.items[i].name, s.cx, s.cy + s.h / 2 - 10, { alpha: ease.out(seg(t, a + 0.7, a + 1.1)) }); });
+  };
+  // 2. Grid pop — pieces pop into a grid, then the whole group slowly zooms and drifts.
+  T.gridpop = (ctx, t, spec, A, D) => {
+    const n = A.items.length, endAt = D - 4, per = (endAt - 2.5) / Math.max(n, 1), slots = gridSlots(n, 440, 1520);
+    const z = 1 + 0.08 * ease.inOut(seg(t, 2.5, endAt)); ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-W / 2, -H / 2 - 20 * ease.inOut(seg(t, 2.5, endAt)));
+    text(ctx, spec.title, W / 2, 250, { size: 84, font: SERIF, alpha: ease.out(seg(t, 0.1, 0.9)) });
+    A.items.forEach((img, i) => { const a = 0.8 + i * per, p = ease.back(seg(t, a, a + 0.7)); if (p <= 0) return; const s = slots[i]; card(ctx, s.cx - s.w / 2, s.cy - s.h / 2, s.w, s.h, Math.min(1, p)); drawFit(ctx, img, s.cx, s.cy, s.w * 0.8, s.h * 0.8, { alpha: Math.min(1, p), scale: p }); });
+    ctx.restore();
+    text(ctx, spec.subtitle, W / 2, 1640, { size: 36, color: "#6e665c", alpha: ease.out(seg(t, 1, 2)) });
+  };
+  // 3. Flip cards — one piece at a time on a big card that flips in, with its name.
+  T.flip = (ctx, t, spec, A, D) => {
+    const n = A.items.length, endAt = D - 4, per = (endAt - 1.2) / Math.max(n, 1);
+    text(ctx, spec.title, W / 2, 200, { size: 72, font: SERIF, alpha: ease.out(seg(t, 0.1, 0.8)) });
+    A.items.forEach((img, i) => { const a = 1.2 + i * per, p = seg(t, a, a + per); if (p <= 0 || p >= 1) return; const inP = ease.out(seg(p, 0, 0.3)), outP = seg(p, 0.85, 1);
+      const sx = Math.cos((1 - inP) * Math.PI / 2) * (1 - outP * 0.2); ctx.save(); ctx.translate(W / 2, H / 2 - 60); ctx.scale(sx, 1); ctx.globalAlpha = 1 - outP;
+      card(ctx, -400, -620, 800, 1180); drawFit(ctx, img, 0, -60, 640, 900, { shadow: false }); text(ctx, spec.items[i].name, 0, 470, { size: 40, weight: 600, maxWidth: 700 });
+      if (spec.items[i].price) pill(ctx, spec.items[i].price, 0, 530, { size: 28, bg: "#1c1915", color: "#fffaf0" }); ctx.restore();
+      text(ctx, `${i + 1} / ${n}`, W / 2, 1700, { size: 30, color: "#6e665c", alpha: 1 - outP }); });
+  };
+  // 4. Mirror — a hero photo (try-on / model) with a slow zoom, pieces slide in along the side.
+  T.mirror = (ctx, t, spec, A, D) => {
+    const n = A.items.length, endAt = D - 4, per = (endAt - 1.5) / Math.max(n, 1);
+    if (A.hero) { drawCover(ctx, A.hero, 0, 0, W, H, 1 + 0.12 * seg(t, 0, endAt)); ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.fillRect(0, 0, W, H); }
+    text(ctx, spec.title, 80, 220, { size: 76, font: SERIF, color: A.hero ? "#fff" : "#1c1915", align: "left", alpha: ease.out(seg(t, 0.2, 1)), maxWidth: 700 });
+    A.items.forEach((img, i) => { const a = 1.2 + i * per, p = ease.back(seg(t, a, a + 0.8)); if (p <= 0) return; const cy = 560 + i * ((1500 - 560) / Math.max(n - 1, 1)); const x = W - 180 + (1 - p) * 300;
+      card(ctx, x - 150, cy - 150, 300, 300, p, 28); drawFit(ctx, img, x, cy, 240, 240, { alpha: p, scale: p, shadow: false });
+      pill(ctx, spec.items[i].name, x - 190, cy, { size: 28, alpha: ease.out(seg(t, a + 0.5, a + 0.9)) }); });
+  };
+  // 5. Clean — minimal: each piece fades up centered with a small label; neutral background.
+  T.clean = (ctx, t, spec, A, D) => {
+    const n = A.items.length, endAt = D - 4, per = (endAt - 1) / Math.max(n, 1);
+    A.items.forEach((img, i) => { const a = 1 + i * per, p = seg(t, a, a + per); if (p <= 0 || p >= 1) return; const inP = ease.out(seg(p, 0, 0.25)), outP = seg(p, 0.85, 1);
+      drawFit(ctx, img, W / 2, H / 2 - 80 - (1 - inP) * 40, 820, 1000, { alpha: inP * (1 - outP), scale: 0.96 + 0.04 * inP, shadow: false });
+      text(ctx, spec.items[i].name, W / 2, 1420, { size: 40, weight: 500, alpha: inP * (1 - outP) }); if (spec.items[i].price) pill(ctx, spec.items[i].price, W / 2, 1490, { size: 28, alpha: inP * (1 - outP), bg: "#1c1915", color: "#fffaf0" }); });
+    text(ctx, spec.title, W / 2, 180, { size: 56, font: SERIF, alpha: ease.out(seg(t, 0.1, 0.8)), letter: 1 });
+  };
+  const TEMPLATES = { reveal: "Reveal", gridpop: "Grid pop", flip: "Flip cards", mirror: "Mirror", clean: "Clean" };
+
+  function frame(ctx, t, spec, A) {
+    if (A.bg) ctx.drawImage(A.bg, 0, 0, W, H); else { ctx.fillStyle = spec.bgColor || "#f6efe4"; ctx.fillRect(0, 0, W, H); }
+    const endAt = spec.duration - 4;
+    if (t > endAt) { endCard(ctx, seg(t, endAt, spec.duration), spec, A); }           // ending drawn on its own, no ghosting
+    else (T[spec.template] || T.reveal)(ctx, t, spec, A, spec.duration);
+    if (spec.caption) pill(ctx, spec.caption, W / 2, H - 140, { size: 34, pad: 26, alpha: ease.out(seg(t, 0.8, 1.6)) });
+  }
+
+  // ---- preview (plays on a visible canvas) ----
+  function preview(canvas, spec, A, onTick) {
+    const ctx = canvas.getContext("2d"); canvas.width = W; canvas.height = H; let raf, start = performance.now(), stopped = false;
+    const tick = (now) => { if (stopped) return; const t = ((now - start) / 1000) % spec.duration; frame(ctx, t, spec, A); onTick && onTick(t); raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick); return () => { stopped = true; cancelAnimationFrame(raf); };
+  }
+
+  // ---- recording: real-time capture of the canvas; MP4 on Safari/iOS, WebM elsewhere ----
+  function pickMime() {
+    const c = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4;codecs=avc1,mp4a.40.2", "video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+    return c.find((m) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) || "";
+  }
+  // Records in real time. Frames are pushed explicitly (track.requestFrame) so Safari/iOS captures every
+  // drawn frame; the silent audio track is only added when the AudioContext is actually running.
+  function record(spec, A, { fps = 30, onProgress, onLog, audio = true, audioContext = null } = {}) {
+    const log = (m) => { try { onLog && onLog(m); } catch {} };
+    return new Promise((resolve, reject) => {
+      if (typeof MediaRecorder === "undefined") return reject(new Error("This browser can't record video. Use Safari on iPhone."));
+      const mime = pickMime(); if (!mime) return reject(new Error("No supported video format in this browser."));
+      const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H; const ctx = canvas.getContext("2d"); frame(ctx, 0, spec, A);
+      const stream = canvas.captureStream(0); const vtrack = stream.getVideoTracks()[0]; const push = () => { if (vtrack && typeof vtrack.requestFrame === "function") vtrack.requestFrame(); };
+      let actx = null;
+      if (audio) { try { actx = audioContext || new (window.AudioContext || window.webkitAudioContext)(); const dest = actx.createMediaStreamDestination(); const osc = actx.createOscillator(); const g = actx.createGain(); g.gain.value = 0; osc.connect(g); g.connect(dest); osc.start();
+        if (actx.state === "running") { stream.addTrack(dest.stream.getAudioTracks()[0]); log("audio: silent track added"); } else { log("audio: context " + actx.state + " — recording video only"); } } catch (e) { log("audio: unavailable (" + e.message + ")"); } }
+      const chunks = []; let rec; let stopped = false; let dataCount = 0;
+      try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 }); } catch (e) { return reject(new Error("Recorder failed to start: " + e.message)); }
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) { chunks.push(e.data); dataCount++; } };
+      rec.onerror = (e) => { stopped = true; reject(new Error("Recording error: " + (e.error?.message || e.message || "unknown"))); };
+      rec.onstop = () => { stopped = true; try { actx && !audioContext && actx.close(); } catch {} const type = mime.split(";")[0]; log(`recorder stopped: ${dataCount} chunk(s)`); resolve({ blob: new Blob(chunks, { type }), mime: type, ext: type.includes("mp4") ? "mp4" : "webm" }); };
+      try { rec.start(500); } catch (e) { return reject(new Error("Recorder start failed: " + e.message)); }
+      log(`recorder state: ${rec.state} mime: ${mime} requestFrame: ${!!(vtrack && vtrack.requestFrame)}`);
+      const t0 = performance.now(); const D = spec.duration; let frames = 0;
+      // fixed-step clock: frame i at i/fps seconds, drawn as fast as real time allows
+      const tick = () => {
+        if (stopped) return;
+        const t = (performance.now() - t0) / 1000;
+        if (t >= D) { frame(ctx, D - 0.001, spec, A); push(); log(`drew ${frames} frames in ${t.toFixed(1)}s`); setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 400); return; }
+        frame(ctx, t, spec, A); push(); frames++; onProgress && onProgress(t / D); requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+      setTimeout(() => { if (!stopped) { log("watchdog: forcing stop"); try { rec.state !== "inactive" && rec.stop(); } catch {} } }, (D + 8) * 1000);   // never hang
+    });
+  }
+  async function poster(spec, A, t = 2.5) { const c = document.createElement("canvas"); c.width = W; c.height = H; frame(c.getContext("2d"), Math.min(t, spec.duration - 4.5), spec, A); return await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85)); }
+  function audioFromGesture() { try { const a = new (window.AudioContext || window.webkitAudioContext)(); a.resume(); return a; } catch { return null; } }
+  return { W, H, TEMPLATES, frame, preview, record, poster, pickMime, audioFromGesture };
+})();
+</script>
+<script>
 (() => {
   // ------------------------------------------------------------------ config (public values only)
   const SUPABASE_URL = "https://yjjdzugecimjwgwtkwyw.supabase.co";
@@ -385,6 +578,7 @@ const BG_DESIGNS = (() => {
     state.selfies = s.data || []; state.models = m.data || []; state.garments = g.data || []; state.generations = gen.data || []; state.collages = c.data || [];
     state.shops = sp.data || []; state.settings = st.data || {};
     state.fbPosts = (await sb.from("fb_posts").select("*").order("created_at", { ascending: false })).data || [];   // empty until the fb_posts migration is live
+    state.reels = (await sb.from("reels").select("*").order("created_at", { ascending: false })).data || [];        // empty until the reels migration is live
     state.outfits = (o.data || []).map((x) => ({ ...x, items: (oi.data || []).filter((i) => i.outfit_id === x.id).map((i) => i.garment_id) }));
     renderAll();
   }
@@ -465,9 +659,10 @@ const BG_DESIGNS = (() => {
   document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
   function showTab(t) {
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
-    ["models", "clothing", "tryon", "discover", "collages", "photos", "outfits"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
+    ["models", "clothing", "tryon", "discover", "collages", "photos", "outfits", "reels"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
     window.scrollTo(0, 0);
     if (t === "discover") loadDiscoverStatus();
+    if (t === "reels") renderReelsTab(); else stopReelPreview();
   }
   // Amazon-API products: live image link from Amazon (never copied), no cutout/try-on/collage use.
   const isApi = (g) => !!g && g.source === "amazon_api";
@@ -1479,6 +1674,97 @@ const BG_DESIGNS = (() => {
     el.insertAdjacentHTML("afterend", `<div class="row" style="margin-top:6px"><button class="btn secondary small" data-open-outfit="${outfitId}">Open in Saved Outfits</button>${own.length ? `<button class="btn small" data-collage-outfit="${outfitId}">Make a collage</button>` : ""}</div>`);
     el.parentElement.querySelector("[data-open-outfit]").onclick = () => { showTab("outfits"); outfitSheet(outfitId); };
     const mk = el.parentElement.querySelector("[data-collage-outfit]"); if (mk) mk.onclick = () => { showTab("collages"); newCollageSheet(o); };
+  }
+
+  // ================================================================== REELS (Phase 1: animated outfit reels, rendered on-device)
+  const rl = { outfit: null, template: "reveal", duration: 10, theme: "design:fall_maple", hero: null, stop: null, assets: null, spec: null, result: null };
+  function stopReelPreview() { if (rl.stop) { rl.stop(); rl.stop = null; } }
+  function reelItems(o) { return (o?.items || []).map(garment).filter(Boolean); }
+  function reelPrice(g) { return isApi(g) && g.price_display && g.api_fetched_at && Date.now() - new Date(g.api_fetched_at).getTime() < 24 * 3600e3 ? g.price_display : null; }
+  function renderReelsTab() {
+    $("rlOutfits").innerHTML = state.outfits.map((o) => { const it = reelItems(o)[0]; return `<button class="tile contain ${rl.outfit === o.id ? "sel" : ""}" data-id="${o.id}"><img ${imgAttr(it, "thumb")} alt=""><span class="cap">${esc(o.name)}</span></button>`; }).join("") || '<div class="empty">Save an outfit first (Discover or Outfits tab).</div>';
+    $("rlOutfits").querySelectorAll(".tile").forEach((t) => t.onclick = () => { rl.outfit = t.dataset.id; rl.result = null; $("rlResult").classList.add("hidden"); renderReelsTab(); });
+    $("rlTemplates").innerHTML = Object.entries(ReelEngine.TEMPLATES).map(([k, v]) => `<button class="chip ${rl.template === k ? "on" : ""}" data-t="${k}">${v}</button>`).join("");
+    $("rlTemplates").querySelectorAll(".chip").forEach((c) => c.onclick = () => { rl.template = c.dataset.t; renderReelsTab(); });
+    $("rlDur").querySelectorAll(".chip").forEach((c) => { c.classList.toggle("on", Number(c.dataset.d) === rl.duration); c.onclick = () => { rl.duration = Number(c.dataset.d); renderReelsTab(); }; });
+    const themes = [["Plain cream", "#f6efe4"], ["Plain white", "#ffffff"], ...Object.entries(BG_DESIGNS).map(([k, d]) => [d.name, "design:" + k])];
+    $("rlThemes").innerHTML = themes.map(([n, v]) => `<button class="rlt ${rl.theme === v ? "sel" : ""}" data-v="${esc(v)}" title="${esc(n)}" style="background-image:${designOf(v) ? `url('${designUri(v, 270, 480)}')` : "none"};background-color:${designOf(v) ? "#fff" : v}"></button>`).join("");
+    $("rlThemes").querySelectorAll(".rlt").forEach((b) => b.onclick = () => { rl.theme = b.dataset.v; renderReelsTab(); });
+    const people = [...state.generations.map((g) => ({ k: "generation", id: g.id, p: g.path })), ...state.selfies.map((s) => ({ k: "selfie", id: s.id, p: s.thumb_path || s.path })), ...state.models.map((m) => ({ k: "model", id: m.id, p: m.thumb_path || m.path }))];
+    $("rlHeroRow").classList.toggle("hidden", rl.template !== "mirror");
+    $("rlHero").innerHTML = people.map((e) => `<button class="tile ${rl.hero === e.k + ":" + e.id ? "sel" : ""}" data-h="${e.k}:${e.id}"><img data-path="${esc(e.p)}" alt=""></button>`).join("") || '<div class="empty">Add a try-on photo, selfie or model to use as the hero.</div>';
+    $("rlHero").querySelectorAll(".tile").forEach((t) => t.onclick = () => { rl.hero = t.dataset.h; renderReelsTab(); });
+    const ready = !!(rl.outfit && reelItems(state.outfits.find((o) => o.id === rl.outfit)).length);
+    $("rlPreviewBtn").disabled = !ready; $("rlRender").disabled = !ready;
+    $("rlGrid").innerHTML = (state.reels || []).map((r) => `<button class="tile" data-id="${r.id}" style="aspect-ratio:9/16"><img data-path="${esc(r.poster_path || "")}" alt=""><span class="cap">${esc(r.name)} · ${r.duration_s}s</span></button>`).join("") || '<div class="empty">No saved reels yet.</div>';
+    $("rlGrid").querySelectorAll(".tile").forEach((t) => t.onclick = () => reelSheet(t.dataset.id));
+    fillImgs($("tab-reels"));
+  }
+  async function buildReelSpec() {
+    const o = state.outfits.find((x) => x.id === rl.outfit); const items = reelItems(o).slice(0, 6);
+    if (!items.length) throw new Error("This outfit has no pieces yet.");
+    note("rlMsg", "Loading pieces…");
+    const imgs = await Promise.all(items.map(async (g) => { try { return isApi(g) ? await loadImg(g.image_url) : await loadImg(await blobUrl(g.cutout_path || g.path)); } catch { return null; } }));
+    let hero = null; if (rl.template === "mirror" && rl.hero) { const [k, id] = rl.hero.split(":"); const p = person(k, id); if (p) hero = await loadImg(await blobUrl(p.path)).catch(() => null); }
+    const bg = designOf(rl.theme) ? await loadImg(designUri(rl.theme, ReelEngine.W, ReelEngine.H)) : null;
+    try { await document.fonts.load('600 40px Fraunces'); await document.fonts.load('600 40px "Inter Tight"'); } catch {}
+    const c = state.collages.find((x) => x.outfit_id === o.id); const sp = c ? shopOf(c.id) : null;
+    const keep = items.filter((g, i) => imgs[i]);
+    rl.assets = { items: imgs.filter(Boolean), hero, bg };
+    rl.spec = { template: rl.template, duration: rl.duration, title: o.name, subtitle: (o.caption || "").split("\n")[0].slice(0, 60), caption: $("rlCaption").value.trim(), bgColor: designOf(rl.theme) ? null : rl.theme,
+      items: keep.map((g) => ({ name: g.name, price: reelPrice(g) })), cta: sp?.published ? "Shop page in bio" : "Links in bio", disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE), handle: state.settings.handle || "",
+      links: keep.map((g) => ({ name: g.name, brand: g.brand || "", url: g.affiliate_url || "", asin: g.asin || null })), shop_url: sp?.published ? shopLink(sp) : null, outfit_id: o.id, collage_id: c?.id || null };
+    note("rlMsg", "");
+  }
+  $("rlPreviewBtn").onclick = async () => {
+    try { stopReelPreview(); await buildReelSpec(); $("rlPreviewWrap").classList.remove("hidden"); rl.stop = ReelEngine.preview($("rlPreview"), rl.spec, rl.assets, (t) => note("rlMsg", `Preview ${t.toFixed(1)}s / ${rl.spec.duration}s`)); $("rlPreviewWrap").scrollIntoView({ behavior: "smooth", block: "center" }); }
+    catch (e) { note("rlMsg", e.message, true); }
+  };
+  $("rlRender").onclick = async () => {
+    const actx = ReelEngine.audioFromGesture();        // started inside the tap, so iOS allows it
+    if (!ReelEngine.pickMime()) { note("rlMsg", "This browser can't record video. Open Studio in Safari on your iPhone.", true); return; }
+    $("rlRender").disabled = true; $("rlResult").classList.add("hidden");
+    try {
+      stopReelPreview(); await buildReelSpec();
+      note("rlMsg", `Rendering ${rl.spec.duration}s… keep this screen open.`);
+      const r = await ReelEngine.record(rl.spec, rl.assets, { audioContext: actx, onProgress: (p) => note("rlMsg", `Rendering… ${Math.round(p * 100)}%`) });
+      rl.result = r; const v = $("rlVideo"); v.src = URL.createObjectURL(r.blob); $("rlResult").classList.remove("hidden");
+      note("rlMsg", `Done — ${r.ext.toUpperCase()}, ${(r.blob.size / 1048576).toFixed(1)} MB.` + (r.ext !== "mp4" ? " (This browser made a WebM; Safari on iPhone makes MP4 for Reels.)" : ""));
+      $("rlResult").scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (e) { note("rlMsg", e.message, true); }
+    $("rlRender").disabled = false; try { actx && actx.close(); } catch {}
+  };
+  $("rlDownload").onclick = async () => { if (!rl.result) return; const file = new File([rl.result.blob], `closetiq-reel.${rl.result.ext}`, { type: rl.result.mime });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch {} } else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); } };
+  $("rlSave").onclick = async () => {
+    if (!rl.result || !rl.spec) return; $("rlSave").disabled = true; note("rlMsg", "Saving…");
+    try {
+      const id = crypto.randomUUID(), base = `${state.uid}/reels/${id}`;
+      await upload(`${base}.${rl.result.ext}`, rl.result.blob); await upload(`${base}.jpg`, await ReelEngine.poster(rl.spec, rl.assets));
+      const o = state.outfits.find((x) => x.id === rl.spec.outfit_id); const caption = genCaption("instagram", "casual", { title: o.name, items: reelItems(o), s: state.settings, mode: "clothing" });
+      const { error } = await sb.from("reels").insert({ id, outfit_id: rl.spec.outfit_id, collage_id: rl.spec.collage_id, name: o.name, template: rl.spec.template, theme: rl.theme, duration_s: rl.spec.duration, caption, links: rl.spec.links, path: `${base}.${rl.result.ext}`, poster_path: `${base}.jpg`, mime: rl.result.mime, size_bytes: rl.result.blob.size, width: ReelEngine.W, height: ReelEngine.H });
+      if (error) throw new Error(error.message);
+      await loadAll(); renderReelsTab(); note("rlMsg", "Saved. Find it under Saved reels — open it for caption, links and sharing.");
+    } catch (e) { note("rlMsg", e.message, true); }
+    $("rlSave").disabled = false;
+  };
+  function reelSheet(id) {
+    const r = (state.reels || []).find((x) => x.id === id); if (!r) return;
+    openSheet(`<h3>${esc(r.name)} · ${r.duration_s}s · ${esc(ReelEngine.TEMPLATES[r.template] || r.template)}</h3>
+      <video id="rsVideo" controls playsinline style="width:100%;border-radius:14px;background:#000"></video>
+      <p class="kv">${(r.size_bytes / 1048576).toFixed(1)} MB · ${esc(r.mime || "")} · ${esc(fmtWhen(r.created_at))}</p>
+      <div class="stack"><div><label>Caption (links + disclosure)</label><textarea id="rsCap" style="min-height:140px">${esc(r.caption)}</textarea></div>
+        <div class="row"><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsLinks">Copy links</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
+        <button class="btn" id="rsShare">Save to Photos / share</button>
+        <p class="kv">To post: Save to Photos → open Instagram or Facebook → New Reel → pick the video → add music from their library → paste the caption. The affiliate links and disclosure are in the caption; the Shop the Look ending is already in the video.</p>
+        <button class="btn danger" id="rsDel">Delete reel</button><div id="rsMsg" class="msg"></div></div>`);
+    url(r.path).then((u) => { $("rsVideo").src = u; });
+    $("rsCopy").onclick = () => copyText($("rsCap").value, "rsMsg");
+    $("rsLinks").onclick = () => copyText((r.links || []).map((l) => `${l.name}: ${l.url || "(no link)"}`).join("\n"), "rsMsg");
+    $("rsSaveCap").onclick = async () => { const { error } = await sb.from("reels").update({ caption: $("rsCap").value }).eq("id", r.id); note("rsMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
+    $("rsShare").onclick = async () => { try { note("rsMsg", "Preparing…"); const blob = await blobOf(r.path); const file = new File([blob], `closetiq-reel.${r.path.endsWith(".webm") ? "webm" : "mp4"}`, { type: r.mime || "video/mp4" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: r.caption }); note("rsMsg", ""); } else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); note("rsMsg", "Downloaded."); } } catch (e) { if (e.name !== "AbortError") note("rsMsg", e.message, true); } };
+    $("rsDel").onclick = async () => { if (!confirm("Delete this reel?")) return; await removeFiles([r.path, r.poster_path]); await sb.from("reels").delete().eq("id", r.id); closeSheet(); await loadAll(); renderReelsTab(); };
   }
 
   // ================================================================== FACEBOOK (Page queue + profile sharing)
