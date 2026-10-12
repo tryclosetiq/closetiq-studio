@@ -60,7 +60,11 @@
   .msg.err{color:var(--danger)} .msg.ok{color:var(--ok)}
   .empty{color:var(--muted);font-size:14px;padding:18px 0;text-align:center}
   nav{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;background:var(--card);border-top:1px solid var(--line);padding:6px 2px calc(6px + env(safe-area-inset-bottom))}
-  .tab{flex:1;background:none;border:0;padding:6px 0;font-size:10.5px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
+  .tab{flex:1;background:none;border:0;padding:6px 0;font-size:10px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
+  .price{font-variant-numeric:tabular-nums;font-weight:600}
+  .ofit{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  .ofit .tile{aspect-ratio:3/4}
+  .ofit .tile img{object-fit:contain;background:#fff}
   .tab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   .tab.on{color:var(--accent);font-weight:600}
   .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:20;display:none}
@@ -167,9 +171,25 @@
     </div>
   </section>
 
+  <section id="tab-discover" class="hidden">
+    <h2>Discover</h2>
+    <p class="hint">Describe what you want; Studio searches Amazon for real products and styles coordinated outfits.</p>
+    <div class="card stack">
+      <textarea id="dvPrompt" placeholder="e.g. Create 5 trendy fall outfits under $100 each, women's, casual weekend"></textarea>
+      <div class="chips" id="dvExamples"><button class="chip">5 trendy fall outfits under $100 each</button><button class="chip">3 office looks under $150, neutral palette</button><button class="chip">4 date-night outfits, black and red, under $120</button></div>
+      <p class="kv" id="dvCaps">Loading…</p>
+      <button class="btn" id="dvGo">Find outfits</button>
+      <div id="dvMsg" class="msg"></div>
+    </div>
+    <div id="dvResults" class="stack"></div>
+    <p class="kv" style="margin-top:14px">Product photos and prices come live from Amazon and are refreshed within 24 hours; Studio never stores them. As an Amazon Associate I earn from qualifying purchases.</p>
+    <details class="ed" style="margin-top:10px"><summary>Recent runs</summary><div id="dvRuns" class="stack"></div></details>
+  </section>
+
   <section id="tab-collages" class="hidden">
     <h2>Collages</h2>
     <p class="hint">Clothing only, you + outfit, or an AI model + outfit. Tap one to edit.</p>
+    <div class="row" style="margin-bottom:10px"><button class="btn secondary" id="fbQueueBtn">Facebook queue</button></div>
     <div class="grid" id="collageGrid"></div>
   </section>
 
@@ -191,6 +211,7 @@
   <button class="tab on" data-tab="models"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Models</button>
   <button class="tab" data-tab="clothing"><svg viewBox="0 0 24 24"><path d="M8 4l4 2 4-2 4 4-3 2v10H7V10L4 8z"/></svg>Clothing</button>
   <button class="tab" data-tab="tryon"><svg viewBox="0 0 24 24"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg>Try-On</button>
+  <button class="tab" data-tab="discover"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M11 8v6M8 11h6"/></svg>Discover</button>
   <button class="tab" data-tab="collages"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="12" rx="1.5"/><rect x="15" y="3" width="6" height="7" rx="1.5"/><rect x="15" y="12" width="6" height="9" rx="1.5"/><rect x="3" y="17" width="10" height="4" rx="1.5"/></svg>Collages</button>
   <button class="tab" data-tab="photos"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>Photos</button>
   <button class="tab" data-tab="outfits"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>Outfits</button>
@@ -287,6 +308,7 @@
     ]);
     state.selfies = s.data || []; state.models = m.data || []; state.garments = g.data || []; state.generations = gen.data || []; state.collages = c.data || [];
     state.shops = sp.data || []; state.settings = st.data || {};
+    state.fbPosts = (await sb.from("fb_posts").select("*").order("created_at", { ascending: false })).data || [];   // empty until the fb_posts migration is live
     state.outfits = (o.data || []).map((x) => ({ ...x, items: (oi.data || []).filter((i) => i.outfit_id === x.id).map((i) => i.garment_id) }));
     renderAll();
   }
@@ -367,9 +389,15 @@
   document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
   function showTab(t) {
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
-    ["models", "clothing", "tryon", "collages", "photos", "outfits"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
+    ["models", "clothing", "tryon", "discover", "collages", "photos", "outfits"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
     window.scrollTo(0, 0);
+    if (t === "discover") loadDiscoverStatus();
   }
+  // Amazon-API products: live image link from Amazon (never copied), no cutout/try-on/collage use.
+  const isApi = (g) => !!g && g.source === "amazon_api";
+  const imgAttr = (g, pref) => !g ? 'data-path=""' : isApi(g) ? `src="${esc(g.image_url || "")}"` : `data-path="${esc(pref === "thumb" ? (g.cutout_path || g.thumb_path || g.path) : (g.cutout_path || g.path))}"`;
+  const ownGarments = () => state.garments.filter((g) => !isApi(g));
+  const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
 
   // ================================================================== MY MODELS (photos + AI)
   const MODEL_PRESETS = [
@@ -462,7 +490,7 @@
   function renderGarments() {
     const g = $("garmentGrid");
     g.innerHTML = `<button class="tile add" id="addGarment">+ Add clothing</button>` +
-      state.garments.map((x) => `<button class="tile contain" data-id="${x.id}"><img data-path="${esc(x.cutout_path || x.thumb_path || x.path)}" alt="">${x.cutout_path ? '<span class="badge">clean</span>' : ""}<span class="cap">${esc(x.name)}</span></button>`).join("");
+      state.garments.map((x) => `<button class="tile contain" data-id="${x.id}"><img ${imgAttr(x, "thumb")} alt="">${isApi(x) ? '<span class="badge">Amazon</span>' : x.cutout_path ? '<span class="badge">clean</span>' : ""}<span class="cap">${esc(x.name)}</span></button>`).join("");
     $("addGarment").onclick = () => $("garmentFile").click();
     g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => garmentSheet(t.dataset.id));
     fillImgs(g);
@@ -597,6 +625,7 @@
   }
   function garmentSheet(id) {
     const x = garment(id); if (!x) return;
+    if (isApi(x)) return apiGarmentSheet(x);
     openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip ${x.cutout_path ? "" : "on"}" data-v="path">Product photo</button>${x.cutout_path ? '<button class="chip on" data-v="cutout_path">Clean cutout</button>' : ""}${x.source_path ? '<button class="chip" data-v="source_path">Original upload</button>' : ""}</div>
       <img class="big contain" id="gImg" data-path="${esc(x.cutout_path || x.path)}" alt="">
       <div class="stack" style="margin-top:12px">${garmentFields(x)}
@@ -613,6 +642,26 @@
     $("gExtract").onclick = () => spendAction("/extract", cost("extract"), "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
     $("gBg").onclick = () => spendAction("/bgremove", cost("bgremove"), "Remove the background from the extracted clothing (transparent PNG).", x);
     $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await removeFiles([x.path, x.thumb_path, x.cutout_path, x.source_path]); await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
+  }
+  // Product found through the Amazon API: shown live, refreshable, editable details, no image processing.
+  function apiGarmentSheet(x) {
+    const stale = !x.api_fetched_at || Date.now() - new Date(x.api_fetched_at).getTime() > 24 * 3600e3;
+    openSheet(`<img class="big contain" src="${esc(x.image_url || "")}" alt="">
+      <p class="kv" style="margin:8px 0"><span class="price">${stale ? "Price needs a refresh" : esc(x.price_display || "")}</span>${x.availability ? " · " + esc(x.availability.toLowerCase().replace(/_/g, " ")) : ""}${x.api_fetched_at ? " · as of " + esc(fmtWhen(x.api_fetched_at)) : ""}</p>
+      <div class="stack">
+        <div><label>Name</label><input type="text" id="gName" value="${esc(x.name)}"></div>
+        <div class="row"><div><label>Brand</label><input type="text" id="gBrand" value="${esc(x.brand)}"></div>
+          <div><label>Type</label><select id="gCat">${CATS.map((c) => `<option ${x.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div></div>
+        <div><label>Notes</label><textarea id="gNotes">${esc(x.notes)}</textarea></div>
+        <p class="kv">Link: <span style="word-break:break-all">${esc(x.affiliate_url || "")}</span></p>
+        <button class="btn" id="gUpdate">Save changes</button>
+        <button class="btn secondary" id="gRefresh">Refresh price &amp; photo from Amazon</button>
+        <a class="btn secondary" href="${esc(x.affiliate_url || "#")}" target="_blank" rel="noopener">Open on Amazon</a>
+        <p class="kv">Amazon's rules don't allow storing or editing API product photos, so try-on, extraction and collages aren't available for this item. Import a screenshot of it instead if you need those.</p>
+        <button class="btn danger" id="gDel">Delete</button><div id="gMsg" class="msg"></div></div>`);
+    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update({ name: $("gName").value.trim(), brand: $("gBrand").value.trim(), category: $("gCat").value, notes: $("gNotes").value.trim() }).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
+    $("gRefresh").onclick = async () => { try { note("gMsg", "Refreshing…"); const r = await api("/amazon/refresh", { method: "POST", body: JSON.stringify({ garment_ids: [x.id] }) }); await loadAll(); apiGarmentSheet(garment(x.id)); note("gMsg", r.updated ? "Refreshed from Amazon." : "Amazon returned no data for this item (it may be unavailable).", !r.updated); } catch (e) { note("gMsg", e.message, true); } };
+    $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
   }
   async function spendAction(path, credits, what, x) {
     if (!confirmSpend(credits, what)) return;
@@ -633,7 +682,7 @@
     const people = [...state.selfies.map((s) => ({ k: "s", id: s.id, p: s.thumb_path || s.path, l: s.label || "My photo" })), ...state.models.map((m) => ({ k: "m", id: m.id, p: m.thumb_path || m.path, l: m.name }))];
     const cur = state.sel.model ? "m" + state.sel.model : state.sel.selfie ? "s" + state.sel.selfie : "";
     ps.innerHTML = people.map((e) => `<button class="tile ${cur === e.k + e.id ? "sel" : ""}" data-k="${e.k}" data-id="${e.id}"><img data-path="${esc(e.p)}" alt=""><span class="cap">${esc(e.l)}</span></button>`).join("") || '<div class="empty">Add a photo or generate a model first</div>';
-    pg.innerHTML = state.garments.map((g) => `<button class="tile contain ${state.sel.garment === g.id ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first</div>';
+    pg.innerHTML = ownGarments().map((g) => `<button class="tile contain ${state.sel.garment === g.id ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first (Amazon-API products can\'t be used for try-on)</div>';
     ps.querySelectorAll(".tile").forEach((t) => t.onclick = () => { if (t.dataset.k === "m") { state.sel.model = t.dataset.id; state.sel.selfie = null; } else { state.sel.selfie = t.dataset.id; state.sel.model = null; } renderPickers(); });
     pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => { const g = garment(t.dataset.id); state.sel.garment = g.id; state.sel.src = g.cutout_path ? "cutout" : "path"; renderPickers(); });
     const g = garment(state.sel.garment);
@@ -729,7 +778,7 @@
     openSheet(`<h3>${o ? "Edit outfit" : "New outfit"}</h3><div class="stack">
       <div><label>Name</label><input type="text" id="oName" value="${esc(o?.name || "")}" placeholder="Date night in black"></div>
       <div><label>Caption for posts</label><textarea id="oCap" placeholder="Links below 👇">${esc(o?.caption || "")}</textarea></div>
-      <div><label>Pick clothing</label><div class="grid" id="oPick">${state.garments.map((g) => `<button class="tile contain ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("")}</div></div>
+      <div><label>Pick clothing</label><div class="grid" id="oPick">${state.garments.map((g) => `<button class="tile contain ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img ${imgAttr(g, "thumb")} alt=""><span class="cap">${esc(g.name)}</span></button>`).join("")}</div></div>
       <button class="btn" id="oSave">Save outfit</button><div id="oMsg" class="msg err"></div></div>`);
     $("oPick").querySelectorAll(".tile").forEach((t) => t.onclick = () => { chosen.has(t.dataset.id) ? chosen.delete(t.dataset.id) : chosen.add(t.dataset.id); t.classList.toggle("sel"); });
     $("oSave").onclick = async () => {
@@ -752,7 +801,7 @@
     openSheet(`<h3>${esc(o.name)}</h3>
       ${hero ? `<img class="big" data-path="${esc(hero.path)}" alt="">` : ""}
       <div class="stack" style="margin-top:10px">
-        <div class="strip">${items.map((g) => `<div class="tile contain"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></div>`).join("")}</div>
+        <div class="strip">${items.map((g) => `<div class="tile contain"><img ${imgAttr(g, "thumb")} alt=""><span class="cap">${esc(g.name)}</span></div>`).join("")}</div>
         <div class="card links"><strong>Links</strong><div class="kv" style="white-space:pre-wrap;margin-top:6px">${esc(linksText(o.name, o.caption, items))}</div></div>
         <button class="btn" id="oCopy">Copy caption + links</button>
         <button class="btn secondary" id="oCollage">Collage builder</button>
@@ -765,13 +814,15 @@
       const existing = state.collages.find((c) => c.outfit_id === o.id);
       if (existing) return openEditor(existing);
       const old = o.layout && o.layout.boxes;
-      const layout = old ? { v: 2, mode: "clothing", size: "portrait", bg: BG_NAMED[o.layout.bg] || "#f6efe4", layers: o.layout.boxes.map((b) => ({ id: newId(), kind: "item", g: b.g, x: b.x + b.w / 2, y: b.y + b.w * 0.6, w: b.w, rot: 0 })) }
-                         : makeLayout(items.map((g) => g.id), "grid");
+      const own = items.filter((g) => !isApi(g));
+      if (!own.length) return alert("Collages can only use your own imported photos — Amazon-API product images can't be stored or edited under Amazon's rules.");
+      const layout = old ? { v: 2, mode: "clothing", size: "portrait", bg: BG_NAMED[o.layout.bg] || "#f6efe4", layers: o.layout.boxes.filter((b) => !isApi(garment(b.g))).map((b) => ({ id: newId(), kind: "item", g: b.g, x: b.x + b.w / 2, y: b.y + b.w * 0.6, w: b.w, rot: 0 })) }
+                         : makeLayout(own.map((g) => g.id), "grid");
       const { data, error } = await sb.from("collages").insert({ name: o.name, outfit_id: o.id, layout }).select("*").single();
       if (error) return alert(error.message);
       await loadAll(); openEditor(data);
     };
-    $("oTry").onclick = () => outfitTrySheet(o, items);
+    $("oTry").onclick = () => { const own = items.filter((g) => !isApi(g)); if (!own.length) { note("oMsg", "This outfit only has Amazon-API products, which can't be used for try-on.", true); return; } outfitTrySheet(o, own); };
     $("oEdit").onclick = () => outfitEditor(o);
     $("oDel").onclick = async () => { if (!confirm(`Delete "${o.name}"? (Clothing, collages and photos stay.)`)) return; await sb.from("outfits").delete().eq("id", o.id); closeSheet(); await loadAll(); };
   }
@@ -877,11 +928,11 @@
     fillImgs(g);
   }
   function newCollageSheet(outfit) {
-    const chosen = new Set(outfit ? outfit.items : []); let preset = "grid", mode = "clothing";
+    const chosen = new Set((outfit ? outfit.items : []).filter((id) => !isApi(garment(id)))); let preset = "grid", mode = "clothing";
     openSheet(`<h3>New collage</h3><div class="stack">
       <div><label>Name</label><input type="text" id="cName" placeholder="Fall outfit ideas" value="${esc(outfit?.name || "")}"></div>
       <div><label>Mode</label><div class="chips" id="cMode">${Object.entries(MODES).map(([k, v]) => `<button class="chip ${k === "clothing" ? "on" : ""}" data-m="${k}">${v}</button>`).join("")}</div></div>
-      <div><label>Pick clothing</label><div class="grid" id="cPick">${state.garments.map((g) => `<button class="tile contain ${chosen.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first.</div>'}</div></div>
+      <div><label>Pick clothing</label><div class="grid" id="cPick">${ownGarments().map((g) => `<button class="tile contain ${chosen.has(g.id) && !isApi(g) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first (Amazon-API products can\'t go in collages).</div>'}</div></div>
       <div id="cPresetWrap"><label>Starting layout</label><div class="chips" id="cPreset">${Object.entries(PRESETS).map(([k, v]) => `<button class="chip ${k === "grid" ? "on" : ""}" data-p="${k}">${v}</button>`).join("")}</div></div>
       <button class="btn" id="cCreate">Open editor</button><div id="cMsg" class="msg err"></div></div>`);
     $("cPick").querySelectorAll(".tile").forEach((t) => t.onclick = () => { chosen.has(t.dataset.id) ? chosen.delete(t.dataset.id) : chosen.add(t.dataset.id); t.classList.toggle("sel"); });
@@ -918,7 +969,7 @@
     $("editor").classList.remove("hidden"); document.body.style.overflow = "hidden";
     await preloadImgs(); renderStatic(); draw();
   }
-  const layerSrc = (l) => { if (l.kind === "item") { const g = garment(l.g); return g ? (g.cutout_path || g.path) : null; } if (l.kind === "person") return l.path; return null; };
+  const layerSrc = (l) => { if (l.kind === "item") { const g = garment(l.g); return g && !isApi(g) ? (g.cutout_path || g.path) : null; } if (l.kind === "person") return l.path; return null; };
   async function preloadImgs() {
     for (const l of ed.layout.layers) { const p = layerSrc(l); if (p && !ed.imgs[p]) ed.imgs[p] = await blobUrl(p); }
   }
@@ -967,7 +1018,7 @@
     $("presetRow").innerHTML = (ed.layout.mode === "clothing" ? Object.entries(PRESETS) : [["around", "Around the person"]]).map(([k, v]) => `<button class="chip" data-p="${k}">${v}</button>`).join("");
     $("presetRow").querySelectorAll(".chip").forEach((c) => c.onclick = () => { applyPreset(ed.layout, c.dataset.p); pushHistory(); draw(); });
     $("addTools").innerHTML = `<button class="btn secondary small" id="addText">+ Text</button>` + (ed.layout.mode !== "clothing" ? `<button class="btn secondary small" id="addPerson">${ed.layout.layers.some((l) => l.kind === "person") ? "Change person" : "+ Person"}</button>` : "") +
-      state.garments.map((g) => `<button class="btn secondary small" data-add="${g.id}">+ ${esc(g.name || "item")}</button>`).join("");
+      ownGarments().map((g) => `<button class="btn secondary small" data-add="${g.id}">+ ${esc(g.name || "item")}</button>`).join("");
     $("addText").onclick = () => { const t = prompt("Text", "Shop the Look"); if (!t) return; ed.layout.layers.push({ id: newId(), kind: "text", t, x: 0.5, y: 0.08, size: 0.07, color: isDark(ed.layout.bg) ? "#f6efe4" : "#1c1915", font: "serif", weight: 600, rot: 0 }); ed.sel = ed.layout.layers.length - 1; pushHistory(); draw(); };
     const ap = $("addPerson"); if (ap) ap.onclick = pickPersonSheet;
     $("addTools").querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => { const g = garment(b.dataset.add); const p = g.cutout_path || g.path; if (!ed.imgs[p]) ed.imgs[p] = await blobUrl(p); ed.layout.layers.push({ id: newId(), kind: "item", g: g.id, x: 0.5, y: 0.5, w: 0.3, rot: 0 }); ed.sel = ed.layout.layers.length - 1; pushHistory(); draw(); });
@@ -1125,6 +1176,7 @@
     await uploadPublic(`${base}/collage.jpg`, await renderLayout(ed.layout, 1080));
     const items = [];
     for (const g of ctx.items) {
+      if (isApi(g)) { items.push({ name: g.name, brand: g.brand || "", url: g.affiliate_url || "", image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
       let image_path = null;
       const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
       if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
@@ -1156,7 +1208,9 @@
       <div class="row"><button class="btn" id="shPublish">${sp?.published ? "Update shop page" : "Publish shop page"}</button>${sp?.published ? '<button class="btn secondary" id="shUnpub">Unpublish</button>' : ""}</div>
       ${sp?.published ? '<div class="row"><button class="btn secondary small" id="shCopyLink">Copy link</button><a class="btn secondary small" id="shOpen" target="_blank" rel="noopener">Open page</a></div>' : ""}
       <hr style="border:0;border-top:1px solid var(--line)">
-      <button class="btn" id="shFacebook">Share to Facebook (image + caption + link)</button>
+      <button class="btn" id="shFbPost">Create Facebook Page post (review → approve → post or schedule)</button>
+      ${state.fbPosts.filter((p) => p.collage_id === ed.c.id && !["cancelled"].includes(p.status)).slice(0, 3).map((p) => `<button class="btn secondary small" data-fbpost="${p.id}">Open ${esc(p.status)} post${p.scheduled_for ? " · " + esc(fmtWhen(p.scheduled_for)) : ""}</button>`).join("")}
+      <button class="btn secondary" id="shFacebook">Share to my personal profile (share sheet: image + caption + link)</button>
       <p class="kv">If Facebook drops the text: use Copy caption and Copy link, then paste into your post. Facebook's own share box opens as a fallback.</p>
       <button class="btn secondary" id="shImage">Save image to Photos</button>
       <button class="btn secondary" id="shAmazon">Prepare for Amazon (images + product list)</button>
@@ -1173,6 +1227,19 @@
       $("shUnpub").onclick = async () => { if (!confirm("Unpublish this shop page? The link will stop working.")) return; await unpublishShop(sp); shareSheet(); };
       $("shCopyLink").onclick = () => copyText(shopLink(sp), "shMsg"); $("shOpen").href = shopLink(sp);
     }
+    $("shFbPost").onclick = async () => {
+      const link = sp?.published ? shopLink(sp) : "";
+      $("shFbPost").disabled = true; note("shMsg", "Preparing post…");
+      try {
+        const id = crypto.randomUUID(), path = `${state.uid}/fb/${id}.jpg`;
+        await upload(path, await renderLayout(ed.layout, 1620));
+        const caption = $("capText").value.trim() + (link ? "\n\nShop every piece: " + link : "");
+        const { error } = await sb.from("fb_posts").insert({ id, collage_id: ed.c.id, caption, image_path: path, status: "draft" });
+        if (error) throw new Error(error.message);
+        await loadAll(); fbPostSheet(id);
+      } catch (e) { note("shMsg", e.message, true); $("shFbPost").disabled = false; }
+    };
+    $("sheetBody").querySelectorAll("[data-fbpost]").forEach((b) => b.onclick = () => fbPostSheet(b.dataset.fbpost));
     $("shFacebook").onclick = async () => {
       const link = sp?.published ? shopLink(sp) : ""; const text = $("capText").value + (link ? "\n\n" + link : "");
       try {
@@ -1191,6 +1258,143 @@
       const files = [new File([portrait], "outfit-4x5.jpg", { type: "image/jpeg" }), new File([square], "outfit-square.jpg", { type: "image/jpeg" })];
       if (navigator.canShare && navigator.canShare({ files })) { try { await navigator.share({ files }); } catch {} } else await saveToPhotos(portrait, "outfit-4x5.jpg");
       note("shMsg", "Product list copied; images sent to Photos. Upload them in the Amazon app → Creator Hub.");
+    };
+  }
+
+  // ================================================================== DISCOVER (Amazon Creators API + AI styling)
+  const dv = { run: null, busy: false };
+  async function loadDiscoverStatus() {
+    try {
+      const s = await api("/discover/runs");
+      $("dvCaps").textContent = s.configured ? `${s.runs_today}/${s.runs_per_day} runs today · up to ${s.amazon_calls_per_run} Amazon searches per run · AI: ${s.model} (about a cent per run)` : "Not set up yet — add the Amazon and Gemini secrets in Supabase (see setup steps).";
+      $("dvGo").disabled = !s.configured || dv.busy;
+      $("dvRuns").innerHTML = (s.runs || []).map((r) => `<button class="card" data-run="${r.id}" style="text-align:left;cursor:pointer;margin:0"><strong>${esc(r.prompt)}</strong><div class="kv">${esc(fmtWhen(r.created_at))} · ${esc(r.status)} · ${(r.outfits || []).filter(Boolean).length} outfit(s)${r.error ? " · " + esc(r.error) : ""}</div></button>`).join("") || '<div class="empty">No runs yet.</div>';
+      $("dvRuns").querySelectorAll("[data-run]").forEach((b) => b.onclick = () => { const r = s.runs.find((x) => x.id === b.dataset.run); if (r) { dv.run = r; renderRun(r); window.scrollTo(0, 0); } });
+    } catch (e) { $("dvCaps").textContent = e.message; }
+  }
+  $("dvExamples").querySelectorAll(".chip").forEach((c) => c.onclick = () => { $("dvPrompt").value = c.textContent; });
+  $("dvGo").onclick = async () => {
+    const prompt = $("dvPrompt").value.trim(); if (!prompt) { note("dvMsg", "Describe the outfits you want first.", true); return; }
+    if (!confirm(`Find outfits for:\n"${prompt}"\n\nThis uses one discovery run (Amazon searches + a few AI calls, roughly a cent). Continue?`)) return;
+    dv.busy = true; $("dvGo").disabled = true; $("dvResults").innerHTML = ""; note("dvMsg", "Planning outfits…");
+    try {
+      const run = await api("/discover", { method: "POST", body: JSON.stringify({ prompt, idempotency_key: crypto.randomUUID() }) });
+      dv.run = run; renderRun(run);
+      const n = (run.plan?.outfits || []).length;
+      for (let i = 0; i < n; i++) {
+        if (run.outfits?.[i]) continue;
+        note("dvMsg", `Searching Amazon for outfit ${i + 1} of ${n}…`);
+        try { const o = await api("/discover/build", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i }) }); run.outfits = run.outfits || []; run.outfits[i] = o; renderRun(run); }
+        catch (e) { note("dvMsg", `Outfit ${i + 1}: ${e.message}`, true); }
+      }
+      note("dvMsg", "Done. Swap any piece, then save the outfits you like.");
+    } catch (e) { note("dvMsg", e.message, true); }
+    dv.busy = false; loadDiscoverStatus();
+  };
+  function renderRun(run) {
+    const plan = run.plan || { outfits: [] }; const built = run.outfits || [];
+    $("dvResults").innerHTML = plan.outfits.map((p, i) => {
+      const o = built[i];
+      if (!o) return `<div class="card"><strong>${esc(p.name || "Outfit " + (i + 1))}</strong><div class="kv">${esc(p.vibe || "")}</div><div class="msg"><span class="spinner"></span> finding pieces…</div></div>`;
+      const priced = o.items.filter((it) => it.price != null).length;
+      return `<div class="card stack" data-o="${i}">
+        <div><strong>${esc(o.name)}</strong><div class="kv">${esc(o.vibe || "")}</div></div>
+        <div class="ofit">${o.items.map((it) => `<div class="tile" data-role="${esc(it.role)}"><img src="${esc(it.image)}" alt="" loading="lazy"><span class="cap">${esc(it.price_display || "")}</span></div>`).join("")}</div>
+        <div class="stack" style="gap:6px">${o.items.map((it) => `<div class="row" style="align-items:flex-start"><div style="flex:1"><div style="font-size:14px">${esc(it.title.slice(0, 80))}${it.title.length > 80 ? "…" : ""}</div><div class="kv">${esc(it.role)}${it.brand ? " · " + esc(it.brand) : ""} · <span class="price">${esc(it.price_display || "price on Amazon")}</span>${it.availability && it.availability !== "IN_STOCK" ? " · " + esc(it.availability.toLowerCase().replace(/_/g, " ")) : ""}</div></div>
+          <div style="flex:0 0 auto;display:flex;gap:6px"><a class="btn secondary small" href="${esc(it.url)}" target="_blank" rel="noopener">View</a><button class="btn secondary small" data-swap="${esc(it.role)}">Swap</button></div></div>`).join("")}</div>
+        <div class="kv">${esc(o.why || "")}</div>
+        <div class="kv">Total <span class="price">$${(o.total || 0).toFixed(2)}</span>${priced < o.items.length ? " (some prices unavailable)" : ""} · prices as of ${esc(fmtWhen(o.items[0]?.fetched_at))}</div>
+        <div class="row"><button class="btn" data-save="${i}">Save outfit</button><button class="btn secondary" data-copy="${i}">Copy links</button></div>
+        <div class="msg" id="dvOMsg${i}"></div></div>`;
+    }).join("");
+    $("dvResults").querySelectorAll("[data-swap]").forEach((b) => b.onclick = async () => {
+      const card = b.closest("[data-o]"), i = Number(card.dataset.o), role = b.dataset.swap; const o = built[i];
+      if (!confirm(`Swap the ${role} for another option? (1–2 Amazon searches + 1 AI call)`)) return;
+      b.disabled = true; note("dvOMsg" + i, "Finding another " + role + "…");
+      try { const exclude = (o.swapped = o.swapped || []); exclude.push(o.items.find((it) => it.role === role)?.asin); const upd = await api("/discover/swap", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i, role, exclude }) }); upd.swapped = exclude; built[i] = upd; renderRun(run); }
+      catch (e) { note("dvOMsg" + i, e.message, true); b.disabled = false; }
+    });
+    $("dvResults").querySelectorAll("[data-save]").forEach((b) => b.onclick = async () => {
+      const i = Number(b.dataset.save), o = built[i]; const name = prompt("Outfit name", o.name); if (name == null) return;
+      b.disabled = true; note("dvOMsg" + i, "Saving…");
+      try { await api("/discover/save", { method: "POST", body: JSON.stringify({ run_id: run.id, outfit_index: i, name }) }); await loadAll(); note("dvOMsg" + i, "Saved to My Clothing and Saved Outfits."); }
+      catch (e) { note("dvOMsg" + i, e.message, true); b.disabled = false; }
+    });
+    $("dvResults").querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => { const o = built[Number(b.dataset.copy)]; copyText([o.name, "", ...o.items.map((it) => `${it.title.slice(0, 80)}: ${it.url}`), "", (state.settings.disclosure || DEFAULT_DISCLOSURE)].join("\n"), "dvOMsg" + b.dataset.copy); });
+  }
+
+  // ================================================================== FACEBOOK (Page queue + profile sharing)
+  const fbPost = (id) => state.fbPosts.find((p) => p.id === id);
+  const toLocalInput = (d) => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 16); };
+  const STATUS_LABEL = { draft: "Draft — needs your approval", approved: "Approved — ready to post or schedule", scheduled: "Scheduled", published: "Published", failed: "Failed", cancelled: "Cancelled" };
+  $("fbQueueBtn").addEventListener("click", fbQueueSheet);
+  async function fbQueueSheet() {
+    openSheet(`<h3>Facebook queue</h3><p class="kv" id="fbqInfo">Loading…</p><div id="fbqList" class="stack"></div>
+      <div class="row" style="margin-top:10px"><button class="btn secondary small" id="fbqSync">Sync with Facebook</button></div><div id="fbqMsg" class="msg"></div>`);
+    const render = () => {
+      const groups = [["scheduled", "Scheduled"], ["approved", "Approved (not yet posted)"], ["draft", "Drafts"], ["published", "Published"], ["failed", "Failed"], ["cancelled", "Cancelled"]];
+      $("fbqList").innerHTML = groups.map(([st, label]) => { const rows = state.fbPosts.filter((p) => p.status === st); if (!rows.length) return "";
+        return `<h3>${label}</h3>` + rows.map((p) => { const c = state.collages.find((x) => x.id === p.collage_id); return `<button class="card row" data-id="${p.id}" style="text-align:left;cursor:pointer;margin:0">
+          <div style="flex:0 0 56px"><div class="tile" style="width:56px"><img data-path="${esc(p.image_path || c?.preview_path || "")}" alt=""></div></div>
+          <div style="min-width:0"><div style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc((p.caption || "").split("\n")[0] || c?.name || "Post")}</div>
+          <div class="kv">${p.scheduled_for && st === "scheduled" ? "Goes live " + esc(fmtWhen(p.scheduled_for)) : p.published_at ? "Published " + esc(fmtWhen(p.published_at)) : esc(fmtWhen(p.created_at))}${p.error ? " · " + esc(p.error.slice(0, 80)) : ""}</div></div></button>`; }).join(""); }).join("") || '<div class="empty">No Facebook posts yet. Open a collage → Share / Publish → Create Facebook Page post.</div>';
+      $("fbqList").querySelectorAll("[data-id]").forEach((b) => b.onclick = () => fbPostSheet(b.dataset.id)); fillImgs($("fbqList"));
+    };
+    render();
+    try { const s = await api("/fb/posts"); $("fbqInfo").textContent = s.configured ? `${s.actions_today}/${s.posts_per_day} posts today · schedule 10 min – 30 days ahead` : "Facebook isn't connected (FB_PAGE_ID / FB_PAGE_TOKEN)."; } catch (e) { $("fbqInfo").textContent = e.message; }
+    $("fbqSync").onclick = async () => { try { note("fbqMsg", "Syncing…"); const r = await api("/fb/sync", { method: "POST", body: "{}" }); await loadAll(); render(); note("fbqMsg", `Synced — ${r.updated} update(s).`); } catch (e) { note("fbqMsg", e.message, true); } };
+  }
+  function fbPostSheet(id) {
+    const p = fbPost(id); if (!p) return;
+    const editable = p.status === "draft" || p.status === "approved", scheduled = p.status === "scheduled", published = p.status === "published";
+    const defaultWhen = toLocalInput(new Date(Date.now() + 20 * 60e3));
+    openSheet(`<h3>Facebook Page post</h3><p class="kv">${esc(STATUS_LABEL[p.status] || p.status)}${p.scheduled_for && scheduled ? " · " + esc(fmtWhen(p.scheduled_for)) : ""}</p>
+      <img class="big" data-path="${esc(p.image_path || "")}" alt="">
+      <div class="stack" style="margin-top:10px">
+        <div><label>Caption (links + disclosure included)</label><textarea id="fbCap" style="min-height:160px" ${editable || scheduled ? "" : "disabled"}>${esc(p.caption)}</textarea></div>
+        ${editable ? `<div class="row"><button class="btn secondary small" id="fbSaveCap">Save caption</button>${p.status === "draft" ? '<button class="btn small" id="fbApprove">Approve</button>' : '<button class="btn secondary small" id="fbUnapprove">Back to draft</button>'}</div>` : ""}
+        ${p.status === "approved" ? `<hr style="border:0;border-top:1px solid var(--line)"><button class="btn" id="fbNow">Post now to the Closetiq Page</button>
+          <div><label>Or schedule for</label><input type="datetime-local" id="fbWhen" value="${defaultWhen}" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:transparent"></div>
+          <button class="btn secondary" id="fbSchedule">Schedule</button>` : ""}
+        ${scheduled ? `<div><label>Change time</label><input type="datetime-local" id="fbWhen" value="${toLocalInput(new Date(p.scheduled_for))}" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:transparent"></div>
+          <div class="row"><button class="btn" id="fbUpdate">Save changes on Facebook</button><button class="btn danger" id="fbCancel">Cancel post</button></div>` : ""}
+        ${published ? `<a class="btn" href="${esc(p.permalink || "https://www.facebook.com/" + (p.fb_post_id || ""))}" target="_blank" rel="noopener">Open on Facebook</a>
+          <button class="btn secondary" id="fbProfile">Share to my personal profile</button>` : ""}
+        ${p.status === "failed" ? `<p class="kv" style="color:var(--danger)">${esc(p.error || "")}</p><button class="btn secondary small" id="fbRetry">Back to approved (retry)</button>` : ""}
+        ${!published && !scheduled ? '<button class="btn danger small" id="fbDelete">Delete post</button>' : ""}
+        <div id="fbMsg" class="msg"></div></div>`);
+    const refresh = async () => { await loadAll(); fbPostSheet(id); };
+    const save = async (patch) => { const { error } = await sb.from("fb_posts").update(patch).eq("id", id); if (error) throw new Error(error.message); };
+    if ($("fbSaveCap")) $("fbSaveCap").onclick = async () => { try { await save({ caption: $("fbCap").value }); await refresh(); note("fbMsg", "Caption saved."); } catch (e) { note("fbMsg", e.message, true); } };
+    if ($("fbApprove")) $("fbApprove").onclick = async () => { if (!confirm("Approve this post? It will NOT be published until you tap Post now or Schedule.")) return; try { await save({ caption: $("fbCap").value, status: "approved", approved_at: new Date().toISOString() }); await refresh(); } catch (e) { note("fbMsg", e.message, true); } };
+    if ($("fbUnapprove")) $("fbUnapprove").onclick = async () => { try { await save({ status: "draft", approved_at: null }); await refresh(); } catch (e) { note("fbMsg", e.message, true); } };
+    if ($("fbRetry")) $("fbRetry").onclick = async () => { try { await save({ status: "approved", error: null, idempotency_key: null }); await refresh(); } catch (e) { note("fbMsg", e.message, true); } };
+    if ($("fbNow")) $("fbNow").onclick = async () => {
+      if (!confirm("Publish this post to the Closetiq Facebook Page right now?")) return;
+      $("fbNow").disabled = true; note("fbMsg", "Posting…");
+      try { await api("/fb/post", { method: "POST", body: JSON.stringify({ post_id: id, key: crypto.randomUUID() }) }); await refresh(); note("fbMsg", "Published."); } catch (e) { await loadAll(); fbPostSheet(id); note("fbMsg", e.message, true); }
+    };
+    if ($("fbSchedule")) $("fbSchedule").onclick = async () => {
+      const when = new Date($("fbWhen").value); if (isNaN(when)) { note("fbMsg", "Pick a date and time.", true); return; }
+      if (!confirm(`Schedule this post on the Closetiq Page for ${when.toLocaleString()}?`)) return;
+      $("fbSchedule").disabled = true; note("fbMsg", "Scheduling…");
+      try { await api("/fb/schedule", { method: "POST", body: JSON.stringify({ post_id: id, key: crypto.randomUUID(), scheduled_for: when.toISOString() }) }); await refresh(); note("fbMsg", "Scheduled."); } catch (e) { await loadAll(); fbPostSheet(id); note("fbMsg", e.message, true); }
+    };
+    if ($("fbUpdate")) $("fbUpdate").onclick = async () => {
+      const when = new Date($("fbWhen").value); const body = { post_id: id, caption: $("fbCap").value };
+      if (!isNaN(when) && when.toISOString() !== p.scheduled_for) body.scheduled_for = when.toISOString();
+      try { note("fbMsg", "Updating…"); await api("/fb/update", { method: "POST", body: JSON.stringify(body) }); await refresh(); note("fbMsg", "Updated on Facebook."); } catch (e) { note("fbMsg", e.message, true); }
+    };
+    if ($("fbCancel")) $("fbCancel").onclick = async () => { if (!confirm("Cancel this scheduled post? It will be removed from Facebook.")) return; try { note("fbMsg", "Cancelling…"); await api("/fb/cancel", { method: "POST", body: JSON.stringify({ post_id: id }) }); await refresh(); } catch (e) { note("fbMsg", e.message, true); } };
+    if ($("fbDelete")) $("fbDelete").onclick = async () => { if (!confirm("Delete this post from Studio? (Nothing on Facebook is affected.)")) return; await removeFiles([p.image_path]); await sb.from("fb_posts").delete().eq("id", id); await loadAll(); closeSheet(); };
+    if ($("fbProfile")) $("fbProfile").onclick = async () => {
+      openSheet(`<h3>Share to your personal profile</h3><p class="hint">Meta doesn't allow apps to post to personal profiles, so this is a one-tap manual share.</p>
+        <div class="stack">
+          <a class="btn" href="${esc(p.permalink || "https://www.facebook.com/" + (p.fb_post_id || ""))}" target="_blank" rel="noopener">1 · Open the Page post in Facebook</a>
+          <p class="kv">2 · Tap <b>Share</b> under the post → <b>Share to Feed</b> → make sure it's sharing as <b>you</b> (your Digital Creator profile), add a line if you like → <b>Post</b>.</p>
+          <p class="kv">The share keeps the collage, your caption and the affiliate links from the Page post. Alternatively:</p>
+          <button class="btn secondary" id="fbShareSheet">Share image + caption via the iPhone share sheet</button><div id="fbpMsg" class="msg"></div></div>`);
+      $("fbShareSheet").onclick = async () => { try { const blob = await blobOf(p.image_path); const file = new File([blob], "outfit.jpg", { type: "image/jpeg" }); if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], text: p.caption }); else await copyText(p.caption, "fbpMsg"); } catch (e) { if (e.name !== "AbortError") note("fbpMsg", e.message, true); } };
     };
   }
 
