@@ -44,6 +44,14 @@
   .card .cv{aspect-ratio:4/5;width:100%;object-fit:cover;display:block;background:var(--soft)} .card .ct{padding:10px 12px 12px} .card .ti{font-weight:600;font-size:15px;line-height:1.25;margin:0} .card .cat{color:var(--muted);font-size:12px;margin:4px 0 0}
   .card .feat{position:absolute;top:8px;left:8px;background:var(--accent);color:var(--accent-ink);font-size:11px;font-weight:600;padding:4px 8px;border-radius:999px}
   .back{display:inline-block;margin:0 0 12px;color:var(--muted);text-decoration:none;font-size:14px}
+  /* storefront sections */
+  .sections{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:4px 0 8px}
+  .sec{display:block;text-align:center;text-decoration:none;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 10px;font:600 15px/1.2 "Inter Tight",sans-serif}
+  .sec.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .view{margin-top:6px} .h2{font:600 22px/1.2 Fraunces,serif;margin:18px 0 10px}
+  .card.prod .ct{padding-bottom:12px} .shopbtn{display:inline-block;margin-top:8px;padding:8px 12px;border-radius:9px;background:var(--accent);color:var(--accent-ink);font-weight:600;font-size:13px}
+  .about{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px} .about p{color:var(--muted);line-height:1.55;margin:0 0 14px}
+  .about .btn{width:100%}
 </style>
 </head>
 <body>
@@ -72,20 +80,45 @@
   const home = location.pathname.split("/").pop() || "shop.html";
   // ---------------------------------------------------------------- homepage (no outfit in the address): grid of published outfits
   if (!slug) {
-    document.title = "ClosetIQ · Shop the looks";
-    let { data: rows, error } = await sb.from("shop_pages").select("slug,title,category,featured,listed,sort_order,cover_public_path,collage_public_path,storefront_url,updated_at").eq("published", true);
-    if (error) ({ data: rows } = await sb.from("shop_pages").select("slug,title,collage_public_path,updated_at").eq("published", true));   // before the homepage columns exist
-    rows = (rows || []).filter((r) => r.listed !== false && (r.cover_public_path || r.collage_public_path))
-      .sort((a, b) => ((b.featured ? 1 : 0) - (a.featured ? 1 : 0)) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || (new Date(b.updated_at) - new Date(a.updated_at)));
-    const store = (rows.map((r) => r.storefront_url).find(ok) || "");
-    const cats = [...new Set(rows.map((r) => (r.category || "").trim()).filter(Boolean))];
-    const card = (r) => `<a class="card" href="${home}?o=${encodeURIComponent(r.slug)}" data-cat="${esc(r.category || "")}">${r.featured ? '<span class="feat">Featured</span>' : ""}<img class="cv" src="${pub(r.cover_public_path || r.collage_public_path)}?v=${encodeURIComponent(r.updated_at)}" alt="${esc(r.title)}" loading="lazy"><div class="ct"><p class="ti">${esc(r.title)}</p>${r.category ? `<p class="cat">${esc(r.category)}</p>` : ""}</div></a>`;
-    page.innerHTML = `<div class="home-head"><p class="brand">ClosetIQ</p><h1 class="logo">Shop the looks</h1><p class="tag">Every outfit, every piece, one tap to Amazon.</p></div>
-      ${store ? `<div class="store"><a class="btn" href="${esc(store)}" target="_blank" rel="noopener sponsored">Visit my Amazon Storefront</a></div>` : ""}
-      ${cats.length ? `<div class="chips" id="cats"><button class="chip on" data-c="">All</button>${cats.map((c) => `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>` : ""}
-      ${rows.length ? `<div class="grid" id="grid">${rows.map(card).join("")}</div>` : '<div class="empty">No outfits published yet — check back soon.</div>'}
-      <p class="disc" style="margin-top:18px">${esc((rows[0] && rows[0].disclosure) || "As an Amazon Associate I earn from qualifying purchases.")}</p>`;
-    const chips = document.getElementById("cats"); if (chips) chips.querySelectorAll(".chip").forEach((b) => b.onclick = () => { chips.querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === b)); document.querySelectorAll("#grid .card").forEach((c) => { c.style.display = !b.dataset.c || c.dataset.cat === b.dataset.c ? "" : "none"; }); });
+    // Storefront: four sections (Complete Looks, Individual Finds, My Favorites, Meet ClosetIQ) switched in place, so
+    // visitors stay here and only leave when they choose an Amazon link. Everything shown is a published snapshot.
+    let { data: rows, error } = await sb.from("shop_pages").select("slug,title,category,featured,listed,sort_order,cover_public_path,collage_public_path,storefront_url,disclosure,updated_at").eq("published", true);
+    if (error) ({ data: rows } = await sb.from("shop_pages").select("slug,title,collage_public_path,disclosure,updated_at").eq("published", true));   // before the homepage columns exist
+    rows = (rows || []).filter((r) => r.listed !== false && (r.cover_public_path || r.collage_public_path)).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));   // newest first
+    const { data: prodRows } = await sb.from("shop_products").select("id,name,brand,category,url,image_public_path,featured,sort_order,updated_at").eq("published", true);
+    const products = (prodRows || []).filter((p) => p.image_public_path && ok(p.url)).sort((a, b) => ((b.featured ? 1 : 0) - (a.featured ? 1 : 0)) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || (new Date(b.updated_at) - new Date(a.updated_at)));
+    const { data: siteRow } = await sb.from("shop_site").select("title,subtitle,about_title,about_text,app_store_url,storefront_url,disclosure").limit(1).maybeSingle();
+    const site = { title: "Shop My Style", subtitle: "Outfits, favorite finds & everyday inspiration.", about_title: "Meet ClosetIQ", ...(siteRow || {}) };
+    const store = ok(site.storefront_url) ? site.storefront_url : (rows.map((r) => r.storefront_url).find(ok) || "");
+    const appUrl = /^https:\/\/apps\.apple\.com\//i.test(site.app_store_url || "") ? site.app_store_url : "";
+    const disclosure = site.disclosure || (rows[0] && rows[0].disclosure) || "As an Amazon Associate I earn from qualifying purchases.";
+    document.title = site.title + " · ClosetIQ";
+    const CATS = [["tops", "Tops"], ["bottoms", "Bottoms"], ["dresses", "Dresses & One-Pieces"], ["shoes", "Shoes"], ["handbags", "Handbags"], ["accessories", "Accessories"]];
+    const catName = (k) => (CATS.find(([c]) => c === k) || [k, k])[1];
+    const outfitCard = (r) => `<a class="card" href="${home}?o=${encodeURIComponent(r.slug)}" data-cat="${esc(r.category || "")}">${r.featured ? '<span class="feat">Favorite</span>' : ""}<img class="cv" src="${pub(r.cover_public_path || r.collage_public_path)}?v=${encodeURIComponent(r.updated_at)}" alt="${esc(r.title)}" loading="lazy"><div class="ct"><p class="ti">${esc(r.title)}</p>${r.category ? `<p class="cat">${esc(r.category)}</p>` : ""}</div></a>`;
+    const productCard = (p) => `<a class="card prod" href="${esc(p.url)}" target="_blank" rel="noopener sponsored" data-cat="${esc(p.category)}">${p.featured ? '<span class="feat">Favorite</span>' : ""}<img class="cv" src="${pub(p.image_public_path)}?v=${encodeURIComponent(p.updated_at)}" alt="${esc(p.name)}" loading="lazy"><div class="ct"><p class="ti">${esc(p.name)}</p>${p.brand ? `<p class="cat">${esc(p.brand)}</p>` : ""}<span class="shopbtn">Shop on Amazon</span></div></a>`;
+    const outfitCats = [...new Set(rows.map((r) => (r.category || "").trim()).filter(Boolean))];
+    const prodCats = CATS.filter(([k]) => products.some((p) => p.category === k));
+    const favOutfits = rows.filter((r) => r.featured), favProducts = products.filter((p) => p.featured);
+    const nav = (cur) => `<div class="sections">${[["looks", "Shop Complete Looks"], ["finds", "Shop Individual Finds"], ["favorites", "My Favorites"], ["about", site.about_title || "Meet ClosetIQ"]].map(([k, l]) => `<a class="sec ${cur === k ? "on" : ""}" href="#${k}" data-sec="${k}">${esc(l)}</a>`).join("")}</div>`;
+    const views = {
+      looks: () => `${outfitCats.length ? `<div class="chips" data-chips="looks"><button class="chip on" data-c="">All looks</button>${outfitCats.map((c) => `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>` : ""}
+        ${rows.length ? `<div class="grid" data-grid="looks">${rows.map(outfitCard).join("")}</div>` : '<div class="empty">New looks are on the way — check back soon.</div>'}`,
+      finds: () => `${prodCats.length ? `<div class="chips" data-chips="finds"><button class="chip on" data-c="">All finds</button>${prodCats.map(([k, l]) => `<button class="chip" data-c="${k}">${esc(l)}</button>`).join("")}</div>` : ""}
+        ${products.length ? `<div class="grid" data-grid="finds">${products.map(productCard).join("")}</div>` : '<div class="empty">Favorite finds are coming soon.</div>'}`,
+      favorites: () => (favOutfits.length || favProducts.length) ? `${favOutfits.length ? `<h2 class="h2">Favorite looks</h2><div class="grid">${favOutfits.map(outfitCard).join("")}</div>` : ""}${favProducts.length ? `<h2 class="h2">Favorite finds</h2><div class="grid">${favProducts.map(productCard).join("")}</div>` : ""}` : '<div class="empty">Nothing saved as a favorite yet.</div>',
+      about: () => `<div class="about"><h2 class="h2" style="margin-top:0">${esc(site.about_title || "Meet ClosetIQ")}</h2>${site.about_text ? `<p>${esc(site.about_text)}</p>` : '<p>ClosetIQ is the AI styling app behind these looks.</p>'}${appUrl ? `<a class="btn" href="${esc(appUrl)}" target="_blank" rel="noopener">Get ClosetIQ on the App Store</a>` : ""}</div>`,
+    };
+    const render = () => {
+      const cur = ["looks", "finds", "favorites", "about"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "looks";
+      page.innerHTML = `<div class="home-head"><p class="brand">ClosetIQ</p><h1 class="logo">${esc(site.title)}</h1>${site.subtitle ? `<p class="tag">${esc(site.subtitle)}</p>` : ""}</div>
+        ${nav(cur)}<div class="view">${views[cur]()}</div>
+        ${store ? `<div class="store"><a class="btn" href="${esc(store)}" target="_blank" rel="noopener sponsored">Visit my Amazon Storefront</a></div>` : ""}
+        <p class="disc" style="margin-top:18px">${esc(disclosure)}</p>`;
+      page.querySelectorAll("[data-chips]").forEach((chips) => chips.querySelectorAll(".chip").forEach((b) => b.onclick = () => { chips.querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === b)); const grid = page.querySelector(`[data-grid="${chips.dataset.chips}"]`); if (grid) grid.querySelectorAll(".card").forEach((c) => { c.style.display = !b.dataset.c || c.dataset.cat === b.dataset.c ? "" : "none"; }); }));
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("hashchange", render); render();
     return;
   }
   const { data: p } = await sb.from("shop_pages").select("title,caption,disclosure,collage_public_path,items,updated_at").eq("slug", slug).eq("published", true).maybeSingle();
@@ -98,7 +131,7 @@
   const placeholder = /^(tops?|bottoms?|shoes?|accessor(y|ies)|dress(es)?|outerwear|bags?|jewel(le)?ry|item|one-pieces?|accessory)$/i;
   const items = (p.items || []).filter((it) => it && (it.image_path || it.image_url) && String(it.name || "").trim() && !placeholder.test(String(it.name).trim())).map((it) => ({ ...it, name: shortName(it.name) }));
   p.items = items;
-  page.innerHTML = `<a class="back" href="${home}${qs.get("from") === "studio" ? "?from=studio" + (qs.get("embed") === "1" ? "&embed=1" : "") : ""}">‹ All outfits</a><p class="brand">Shop this outfit</p><h1>${esc(p.title)}</h1>${p.caption ? `<p class="cap">${esc(p.caption)}</p>` : ""}
+  page.innerHTML = `<a class="back" href="${home}${qs.get("from") === "studio" ? "?from=studio" + (qs.get("embed") === "1" ? "&embed=1" : "") : ""}#looks">‹ All looks</a><p class="brand">Shop this look</p><h1>${esc(p.title)}</h1>${p.caption ? `<p class="cap">${esc(p.caption)}</p>` : ""}
     ${p.collage_public_path ? `<div class="herowrap"><img class="hero" src="${pub(p.collage_public_path)}" alt="${esc(p.title)}">${(p.items || []).filter((it) => it.hotspot && ok(it.url)).map((it) => `<a class="hot" href="${esc(it.url)}" target="_blank" rel="noopener sponsored" aria-label="Shop ${esc(it.name)} on Amazon" style="left:${(it.hotspot.x * 100).toFixed(2)}%;top:${(it.hotspot.y * 100).toFixed(2)}%;width:${(it.hotspot.w * 100).toFixed(2)}%;height:${(it.hotspot.h * 100).toFixed(2)}%"></a>`).join("")}</div>` : ""}
     <p class="disc">${esc(p.disclosure)}</p>
     ${(p.items || []).map((it) => { const fresh = it.price && it.price_at && Date.now() - new Date(it.price_at).getTime() < 24 * 3600e3;

@@ -248,7 +248,7 @@
   <section id="tab-outfits" class="hidden">
     <h2>Saved Outfits</h2>
     <p class="hint">Group clothing into outfits and keep the links together.</p>
-    <div class="row"><button class="btn secondary" id="newOutfit">+ New outfit</button><button class="btn secondary" id="shopHomeBtn">Shop homepage</button></div>
+    <div class="row"><button class="btn secondary" id="newOutfit">+ New outfit</button><button class="btn secondary" id="shopHomeBtn">Storefront</button></div>
     <div id="outfitList" class="stack" style="margin-top:12px"></div>
   </section>
 </main>
@@ -599,6 +599,8 @@ const ReelEngine = (() => {
     ]);
     state.selfies = s.data || []; state.models = m.data || []; state.garments = g.data || []; state.generations = gen.data || []; state.collages = c.data || [];
     state.shops = sp.data || []; state.settings = st.data || {};
+    state.products = (await sb.from("shop_products").select("*").order("sort_order")).data || [];        // storefront finds (empty until the storefront migration is live)
+    state.site = (await sb.from("shop_site").select("*").maybeSingle()).data || null;                   // storefront text (title, about, App Store link)
     state.fbPosts = (await sb.from("fb_posts").select("*").order("created_at", { ascending: false })).data || [];   // empty until the fb_posts migration is live
     state.reels = (await sb.from("reels").select("*").order("created_at", { ascending: false })).data || [];        // empty until the reels migration is live
     state.outfits = (o.data || []).map((x) => ({ ...x, items: (oi.data || []).filter((i) => i.outfit_id === x.id).map((i) => i.garment_id) }));
@@ -1028,6 +1030,9 @@ const ReelEngine = (() => {
       ${x.cutout_path ? `<div style="margin-top:8px"><label>Collages use</label><div class="chips" id="gUse"><button class="chip ${transparent ? "on" : ""}" data-use="transparent">Transparent (free)</button><button class="chip ${transparent ? "" : "on"}" data-use="white">White background</button></div><p class="hint" id="gUseNote" style="margin:6px 0 0">${transparent ? "Only the clothing shows; the collage background fills around it." : "Tap Transparent to remove the white box for free. Light items may need the AI option below instead."}</p></div>` : ""}
       <div class="stack" style="margin-top:12px">${garmentFields(x)}
         <button class="btn" id="gUpdate">Save changes</button>
+        ${(() => { const pr = productOf(x.id), on = !!(pr && pr.published); return `<div class="card" style="margin:0"><label>Storefront · Individual Finds</label>
+          <p class="kv" style="margin:4px 0 8px">${on ? `On the storefront as “${esc(pr.name)}” (${esc((PRODUCT_CATS.find(([k]) => k === pr.category) || ["", pr.category])[1])})${pr.featured ? " · in My Favorites" : ""}.` : productReady(x) ? "Not on the storefront yet. Needs nothing more — tap to show it." : "To show this item it needs a name, an Amazon link and a cutout (or permission to show the original photo)."}</p>
+          <div class="row" style="flex-wrap:wrap"><button class="btn ${on ? "secondary" : ""} small" id="gStore" ${!on && !productReady(x) ? "disabled" : ""}>${on ? "Remove from storefront" : "Show in Individual Finds"}</button>${on ? `<button class="btn secondary small" id="gFav">${pr.featured ? "Remove from My Favorites" : "Add to My Favorites"}</button>` : ""}</div></div>`; })()}
         <button class="btn secondary" id="gTry">Try on</button>
         <button class="btn secondary" id="gExtract">${x.cutout_path ? "Redo extraction" : "Extract clothing only"} · ${cost("extract")} credit</button>
         <button class="btn secondary" id="gBg" ${x.cutout_path ? "" : "disabled"}>Make background transparent · ${cost("bgremove")} credit</button>
@@ -1042,7 +1047,9 @@ const ReelEngine = (() => {
       } catch (e) { note("gMsg", e.message, true); }
     });
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
-    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) { await loadAll(); try { const n = await syncShopPagesForGarment(x.id); if (n) note("gMsg", `Saved. Shop This Look page${n > 1 ? "s" : ""} updated.`); } catch {} } };
+    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) { await loadAll(); try { const n = await syncShopPagesForGarment(x.id); const m = await syncProductForGarment(x.id); if (n || m) note("gMsg", `Saved. ${n ? `Shop This Look page${n > 1 ? "s" : ""} updated.` : ""} ${m ? "Storefront find updated." : ""}`.trim()); } catch {} } };
+    $("gStore").onclick = async () => { try { note("gMsg", "Updating storefront…"); if (productOf(x.id)?.published) { await unpublishProduct(x); note("gMsg", "Removed from the storefront."); } else { await publishProduct(x); note("gMsg", "Now on the storefront under Individual Finds."); } garmentSheet(x.id); } catch (e) { note("gMsg", e.message, true); } };
+    if ($("gFav")) $("gFav").onclick = async () => { try { const pr = productOf(x.id); const { error } = await sb.from("shop_products").update({ featured: !pr.featured, updated_at: new Date().toISOString() }).eq("id", pr.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); garmentSheet(x.id); note("gMsg", pr.featured ? "Removed from My Favorites." : "Added to My Favorites."); } catch (e) { note("gMsg", e.message, true); } };
     $("gTry").onclick = () => { state.sel.garment = x.id; state.sel.src = "path"; closeSheet(); renderPickers(); showTab("tryon"); };
     $("gExtract").onclick = () => spendAction("/extract", cost("extract"), "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
     $("gBg").onclick = () => spendAction("/bgremove", cost("bgremove"), "Remove the background from the extracted clothing (transparent PNG).", x);
@@ -1586,7 +1593,7 @@ const ReelEngine = (() => {
     if (error) { note("edMsg", "Could not save: " + error.message, true); return false; }
     await loadAll(); renderLinks(); renderSelTools();
     note("edMsg", patch.affiliate_url === null ? "Link removed." : patch.affiliate_url ? "Link saved" + (tagAmazon(url, state.settings.amazon_tag).note ? " — " + tagAmazon(url, state.settings.amazon_tag).note : ".") : "Saved.");
-    try { const n = await syncShopPagesForGarment(gid); if (n) note("edMsg", $("edMsg").textContent + ` Shop This Look page${n > 1 ? "s" : ""} updated.`); } catch {}
+    try { const n = await syncShopPagesForGarment(gid); const m = await syncProductForGarment(gid); if (n || m) note("edMsg", $("edMsg").textContent + (n ? ` Shop This Look page${n > 1 ? "s" : ""} updated.` : "") + (m ? " Storefront find updated." : "")); } catch {}
     return true;
   }
   const designOf = (bg) => (typeof bg === "string" && bg.startsWith("design:")) ? BG_DESIGNS[bg.slice(7)] : null;
@@ -1692,7 +1699,7 @@ const ReelEngine = (() => {
     importWizard(f, { replaceGarmentId: g.id, name: g.name, url: g.product_url || g.affiliate_url || "", category: g.category, onSaved: async () => {
       for (const k of Object.keys(ed.imgs)) if (k.includes(g.id)) delete ed.imgs[k];   // drop cached old pictures of this item
       await preloadImgs(); draw(); renderLinks(); renderSelTools(); note("edMsg", "Photo replaced. Tap Save to keep the collage preview up to date.");
-      try { const n = await syncShopPagesForGarment(g.id); if (n) note("edMsg", "Photo replaced. Shop This Look page updated. Tap Save to refresh the collage preview."); } catch {}
+      try { const n = await syncShopPagesForGarment(g.id); const m = await syncProductForGarment(g.id); if (n || m) note("edMsg", "Photo replaced. " + (n ? "Shop This Look page updated. " : "") + (m ? "Storefront find updated. " : "") + "Tap Save to refresh the collage preview."); } catch {}
     } });
   });
   function action(a) {
@@ -1863,14 +1870,67 @@ const ReelEngine = (() => {
   const SHOP_CATEGORIES = ["Everyday Casual", "Workwear", "Date Night", "Going Out", "Vacation", "Athleisure"];
   const pubUrl = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
   async function updateShopPage(sp, patch) { const { error } = await sb.from("shop_pages").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); }
-  function shopHomeSheet() {
+  // ---------------------------------------------------------------- storefront: Individual Finds (one public snapshot per clothing item)
+  const PRODUCT_CATS = [["tops", "Tops"], ["bottoms", "Bottoms"], ["dresses", "Dresses & One-Pieces"], ["shoes", "Shoes"], ["handbags", "Handbags"], ["accessories", "Accessories"]];
+  const productCat = (g) => ({ tops: "tops", bottoms: "bottoms", "one-pieces": "dresses", shoes: "shoes", bag: "handbags", accessory: "accessories" })[g.category] || "accessories";
+  const productOf = (gid) => (state.products || []).find((p) => p.garment_id === gid);
+  const productSrc = (g) => isApi(g) ? null : (g.cutout_path || (g.public_ok ? g.path : null));   // what may be shown publicly
+  const productReady = (g) => !!(productSrc(g) && (g.name || "").trim() && g.affiliate_url);
+  // Publish or refresh one item in Shop Individual Finds: public image copy + snapshot row (same row on re-publish).
+  async function publishProduct(g, opts = {}) {
+    if (!productReady(g)) throw new Error("This item needs a name, an Amazon link and a cutout (or permission to show the original photo) before it can go on the storefront.");
+    const prev = productOf(g.id) || {}; const src = productSrc(g); const png = src.endsWith(".png");
+    const image_public_path = `${state.uid}/products/${g.id}.${png ? "png" : "jpg"}`;
+    // Row first (fails cleanly if the storefront tables aren't there yet), then the public image copy, then the path.
+    const row = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || null, category: opts.category || prev.category || productCat(g), url: g.affiliate_url,
+      published: opts.published ?? (prev.published ?? true), featured: opts.featured ?? (prev.featured ?? false), sort_order: prev.sort_order ?? 0, updated_at: new Date().toISOString() };
+    const write = (r) => prev.id ? sb.from("shop_products").update(r).eq("id", prev.id).eq("user_id", state.uid) : sb.from("shop_products").insert(r);
+    let { error } = await write(row);
+    if (error) throw new Error(/shop_products/.test(error.message) ? "The storefront database update hasn't been applied yet." : error.message);
+    await uploadPublic(image_public_path, await shrink(await blobOf(src), 900, png ? "image/png" : "image/jpeg", 0.85));
+    ({ error } = await sb.from("shop_products").update({ image_public_path }).eq("garment_id", g.id).eq("user_id", state.uid));
+    if (error) throw new Error(error.message);
+    await loadAll(); return productOf(g.id);
+  }
+  async function unpublishProduct(g) {   // off the storefront; the clothing item itself is untouched
+    const p = productOf(g.id); if (!p) return;
+    if (p.image_public_path) await sb.storage.from("shop").remove([p.image_public_path]);
+    const { error } = await sb.from("shop_products").update({ published: false, image_public_path: null, updated_at: new Date().toISOString() }).eq("id", p.id).eq("user_id", state.uid); if (error) throw new Error(error.message);
+    await loadAll();
+  }
+  async function syncProductForGarment(gid) { const g = garment(gid), p = productOf(gid); if (!g || !p?.published) return 0; if (!productReady(g)) { await unpublishProduct(g); return 0; } await publishProduct(g); return 1; }
+  async function saveSite(patch) {
+    const row = { user_id: state.uid, ...(state.site || {}), ...patch, updated_at: new Date().toISOString() };
+    const { error } = await sb.from("shop_site").upsert(row); if (error) throw new Error(/shop_site/.test(error.message) ? "The storefront database update hasn't been applied yet." : error.message);
+    await loadAll();
+  }
+  function shopHomeSheet(tab = "looks") {
     const pages = [...state.shops].sort((a, b) => (b.featured - a.featured) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || (new Date(b.updated_at) - new Date(a.updated_at)));
-    const store = state.settings.amazon_storefront_url || "";
-    openSheet(`<h3>Shop homepage</h3>
-      <p class="hint">One public page for your bios. Every published outfit is added automatically; use the switches to hide, feature or re-order, and pick the cover. Visitors see only published outfits.</p>
-      <div class="row" style="flex-wrap:wrap;margin-bottom:10px"><button class="btn small" id="shhCopy">Copy homepage link</button><button class="btn secondary small" id="shhOpen">Preview homepage</button></div>
+    const site = state.site || {}, store = site.storefront_url || state.settings.amazon_storefront_url || "";
+    const prods = [...(state.products || [])].filter((p) => p.published).sort((a, b) => (b.featured - a.featured) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)));
+    const tabs = `<div class="chips" style="margin-bottom:10px">${[["looks", "Complete Looks"], ["finds", "Individual Finds"], ["about", "About & links"]].map(([k, l]) => `<button class="chip ${tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("")}</div>`;
+    const findsHtml = `<p class="hint">Items you've switched on in My Clothing (open an item → "Show in Individual Finds"). Favorites also appear under My Favorites.</p>
+      <div class="stack" id="shhProds">${prods.map((p) => `<div class="card" data-pr="${p.id}" style="margin:0"><div class="row" style="align-items:flex-start">
+          <div style="flex:0 0 64px"><div class="tile contain" style="width:64px"><img src="${p.image_public_path ? esc(pubUrl(p.image_public_path)) + "?v=" + encodeURIComponent(p.updated_at) : ""}" alt=""></div></div>
+          <div style="flex:1;min-width:0;display:grid;gap:6px"><strong style="font-size:14px">${esc(p.name)}</strong>
+            <select data-f="category" aria-label="Storefront category">${PRODUCT_CATS.map(([k, l]) => `<option value="${k}" ${p.category === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <label class="inline"><input type="checkbox" data-f="featured" ${p.featured ? "checked" : ""}> My Favorites</label>
+            <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" data-act="save">Save</button><button class="btn danger small" data-act="hide">Remove from storefront</button></div></div></div></div>`).join("") || '<div class="empty">No finds on the storefront yet. Open an item in My Clothing and tap "Show in Individual Finds".</div>'}</div>`;
+    const aboutHtml = `<div class="stack">
+      <div><label>Storefront title</label><input type="text" id="stTitle" value="${esc(site.title || "Shop My Style")}"></div>
+      <div><label>Subtitle</label><input type="text" id="stSub" value="${esc(site.subtitle ?? "Outfits, favorite finds & everyday inspiration.")}"></div>
+      <div><label>Meet ClosetIQ — section title</label><input type="text" id="stAboutTitle" value="${esc(site.about_title || "Meet ClosetIQ")}"></div>
+      <div><label>Meet ClosetIQ — short introduction (factual, no fit or quality claims)</label><textarea id="stAbout">${esc(site.about_text || "")}</textarea></div>
+      <div><label>App Store link</label><input type="url" id="stApp" value="${esc(site.app_store_url || "")}" placeholder="https://apps.apple.com/…" inputmode="url" autocapitalize="none"></div>
+      <div><label>Amazon Storefront link</label><input type="url" id="stStore" value="${esc(site.storefront_url || state.settings.amazon_storefront_url || "")}" placeholder="https://www.amazon.com/shop/…" inputmode="url" autocapitalize="none"></div>
+      <div><label>Affiliate disclosure shown on the storefront</label><textarea id="stDisc">${esc(site.disclosure || state.settings.disclosure || DEFAULT_DISCLOSURE)}</textarea></div>
+      <button class="btn" id="stSave">Save storefront text</button></div>`;
+    openSheet(`<h3>Storefront</h3>
+      <p class="hint">Your public shopping page for bios. Published outfits appear automatically; use these controls to feature, hide, categorise and write the About section. Visitors only ever see published content.</p>
+      <div class="row" style="flex-wrap:wrap;margin-bottom:10px"><button class="btn small" id="shhCopy">Copy storefront link</button><button class="btn secondary small" id="shhOpen">Preview storefront</button></div>
       <p class="kv" style="word-break:break-all">${esc(SHOP_HOME)}</p>
-      <p class="kv">${store ? `Amazon Storefront button: <span style="word-break:break-all">${esc(store)}</span>` : "No Amazon Storefront link yet — add it under Account (tap the ClosetIQ Studio title)."}</p>
+      ${tabs}
+      ${tab === "finds" ? findsHtml : tab === "about" ? aboutHtml : `<p class="kv">${store ? `Amazon Storefront button: <span style="word-break:break-all">${esc(store)}</span>` : "No Amazon Storefront link yet — add it under About & links."}</p>
       <div class="stack" id="shhList">${pages.map((p) => { const c = state.collages.find((x) => x.id === p.collage_id); const o = p.outfit_id ? state.outfits.find((x) => x.id === p.outfit_id) : (c?.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null); const hero = o && state.generations.find((g) => g.id === o.hero_generation_id);
         return `<div class="card" data-sp="${p.id}" style="margin:0"><div class="row" style="align-items:flex-start">
           <div style="flex:0 0 72px"><div class="tile" style="width:72px;aspect-ratio:4/5"><img src="${p.published && p.cover_public_path ? esc(pubUrl(p.cover_public_path)) + "?v=" + encodeURIComponent(p.updated_at) : ""}" alt=""></div></div>
@@ -1882,9 +1942,27 @@ const ReelEngine = (() => {
             <div class="chips"><button class="chip ${(p.cover_source || "photo") === "photo" ? "on" : ""}" data-cover="photo" ${hero ? "" : "disabled"}>Cover: AI photo${hero ? "" : " (none set)"}</button><button class="chip ${p.cover_source === "collage" ? "on" : ""}" data-cover="collage">Cover: collage</button></div>
             <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" data-act="save">Save</button><button class="btn secondary small" data-act="open">Open page</button>${p.published ? '<button class="btn danger small" data-act="unpub">Unpublish</button>' : (c ? '<button class="btn small" data-act="repub">Republish</button>' : "")}</div>
             <p class="kv">${p.published ? "Published" : "Unpublished (kept, not public)"}${o ? " · outfit: " + esc(o.name) : ""}${hero ? "" : " · set an outfit cover photo under My Photos to use an AI photo cover"}</p>
-          </div></div></div>`; }).join("") || '<div class="empty">No shop pages yet — save an outfit collage and its page is created automatically.</div>'}</div>
+          </div></div></div>`; }).join("") || '<div class="empty">No shop pages yet — save an outfit collage and its page is created automatically.</div>'}</div>`}
       <div id="shhMsg" class="msg"></div>`);
     $("shhCopy").onclick = () => copyText(SHOP_HOME, "shhMsg"); $("shhOpen").onclick = () => openShopPreview(SHOP_HOME);
+    $("sheetBody").querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => shopHomeSheet(b.dataset.tab));
+    if (tab === "about") {
+      $("stSave").onclick = async () => {
+        const app = $("stApp").value.trim(), store = $("stStore").value.trim();
+        if (app && !/^https:\/\/apps\.apple\.com\//i.test(app)) { note("shhMsg", "The App Store link should start with https://apps.apple.com/", true); return; }
+        if (store && !/^https:\/\/([a-z0-9-]+\.)*amazon\.[a-z.]+\//i.test(store)) { note("shhMsg", "The storefront link should be an https://www.amazon.com/… address.", true); return; }
+        try { await saveSite({ title: $("stTitle").value.trim() || "Shop My Style", subtitle: $("stSub").value.trim() || null, about_title: $("stAboutTitle").value.trim() || "Meet ClosetIQ", about_text: $("stAbout").value.trim() || null, app_store_url: app || null, storefront_url: store || null, disclosure: $("stDisc").value.trim() || DEFAULT_DISCLOSURE }); note("shhMsg", "Storefront text saved — live immediately."); shopHomeSheet("about"); note("shhMsg", "Storefront text saved — live immediately."); } catch (e) { note("shhMsg", e.message, true); }
+      };
+      return;
+    }
+    if (tab === "finds") {
+      $("shhProds").querySelectorAll("[data-pr]").forEach((card) => {
+        const p = state.products.find((x) => x.id === card.dataset.pr); const g = garment(p.garment_id);
+        card.querySelector('[data-act="save"]').onclick = async () => { try { const { error } = await sb.from("shop_products").update({ category: card.querySelector('[data-f="category"]').value, featured: card.querySelector('[data-f="featured"]').checked, updated_at: new Date().toISOString() }).eq("id", p.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); shopHomeSheet("finds"); note("shhMsg", "Saved."); } catch (e) { note("shhMsg", e.message, true); } };
+        card.querySelector('[data-act="hide"]').onclick = async () => { if (!confirm(`Remove "${p.name}" from the storefront? The clothing item and its link stay in My Clothing.`)) return; try { if (g) await unpublishProduct(g); else { await sb.from("shop_products").update({ published: false }).eq("id", p.id).eq("user_id", state.uid); await loadAll(); } shopHomeSheet("finds"); note("shhMsg", "Removed from the storefront."); } catch (e) { note("shhMsg", e.message, true); } };
+      });
+      return;
+    }
     $("shhList").querySelectorAll("[data-sp]").forEach((card) => {
       const sp = state.shops.find((x) => x.id === card.dataset.sp); const c = state.collages.find((x) => x.id === sp.collage_id);
       const f = (k) => card.querySelector(`[data-f="${k}"]`);
@@ -1895,7 +1973,7 @@ const ReelEngine = (() => {
       const re = card.querySelector('[data-act="repub"]'); if (re) re.onclick = async () => { try { note("shhMsg", "Publishing…"); await publishShopFor(c, c.layout, {}); note("shhMsg", "Republished at the same link."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } };
     });
   }
-  $("shopHomeBtn").addEventListener("click", shopHomeSheet);
+  $("shopHomeBtn").addEventListener("click", () => shopHomeSheet("looks"));
   async function publishShop(caption) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title }); }
   // Keep published pages in sync after a product edit: every live page whose collage contains the item is re-published.
   async function syncShopPagesForGarment(gid) {
@@ -2169,15 +2247,31 @@ const ReelEngine = (() => {
     const bg = designOf(rl.theme) ? await loadImg(designUri(rl.theme, ReelEngine.W, ReelEngine.H)) : null;
     try { await document.fonts.load('600 40px Fraunces'); await document.fonts.load('600 40px "Inter Tight"'); } catch {}
     const c = state.collages.find((x) => x.outfit_id === o.id); const sp = shopOfOutfit(o.id);   // reels reuse the outfit's one Shop This Look page
-    const keep = items.filter((g, i) => imgs[i]);
-    const miss = missingInfo(keep); rl.missingNote = miss.length ? `${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${miss.map(itemLabel).join(", ")}) will be left out of the caption and shown as unavailable on the shop page. Add the details in My Clothing or the collage editor.` : "";
-    rl.assets = { items: imgs.filter(Boolean), hero, bg };
+    // Only complete products go into the video: a saved name, an Amazon link and a loaded picture. Others are left out
+    // of the video and the caption, and the owner is told which ones.
+    const miss = missingInfo(items.filter((g, i) => imgs[i])); rl.missingNote = miss.length ? `${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${miss.map(itemLabel).join(", ")}) ${miss.length > 1 ? "are" : "is"} left out of the video and caption. Add the details in My Clothing or the collage editor.` : "";
+    const keepIdx = items.map((g, i) => (imgs[i] && (g.name || "").trim() && g.affiliate_url) ? i : -1).filter((i) => i >= 0);
+    const keep = keepIdx.map((i) => items[i]);
+    if (!keep.length) throw new Error("No complete products yet — each piece needs a name and an Amazon link.");
+    const label = (g) => { const n = shortName(g.name); return n.length > 26 ? n.slice(0, 24).replace(/\s+\S*$/, "") + "…" : n; };   // fits the label cards, no overlap
+    rl.assets = { items: keepIdx.map((i) => imgs[i]), hero, bg };
     rl.spec = { template: rl.template, duration: rl.duration, title: o.name, subtitle: (o.caption || "").split("\n")[0].slice(0, 60), caption: $("rlCaption").value.trim(), bgColor: designOf(rl.theme) ? null : rl.theme,
-      items: keep.map((g) => ({ name: g.name, price: reelPrice(g) })), cta: sp?.published ? "Shop page in bio" : "Links in bio", disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE), handle: state.settings.handle || "",
+      items: keep.map((g) => ({ name: label(g), price: reelPrice(g) })), cta: "Shop this look · link in caption", disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE), handle: state.settings.handle || "",
       links: keep.map((g) => ({ garment_id: g.id, name: itemLabel(g), brand: g.brand || "", url: g.affiliate_url || "", asin: g.asin || null })), shop_url: sp?.published ? shopLink(sp) : null, outfit_id: o.id, collage_id: c?.id || null };
     note("rlMsg", rl.missingNote || "");
   }
-  const reelCaption = (o, listLinks) => { const sp = shopOfOutfit(o.id); return genCaption("instagram", "casual", { title: o.name, items: reelItems(o), s: state.settings, mode: "clothing", shop_url: sp?.published ? shopLink(sp) : "", listLinks: !!listLinks }); };
+  // Reel captions: short and clean. ONE shopping destination (the outfit's page by default, or the storefront
+  // homepage, or none), the disclosure, a few hashtags. Individual Amazon links only when explicitly asked for.
+  // No product list by default: a caption full of links makes Facebook attach one of them as the post's link.
+  const reelDest = (o, dest) => { const sp = shopOfOutfit(o.id); if (dest === "none") return ""; if (dest === "home") return SHOP_HOME; return sp?.published ? shopLink(sp) : SHOP_HOME; };
+  function reelCaption(o, opts = {}) {
+    const dest = opts.dest || "outfit", url = reelDest(o, dest), s = state.settings, items = reelItems(o);
+    const hooks = [`${o.name} — all from Amazon.`, `This one's easy: ${o.name.toLowerCase()}.`, `Comfy, put-together, and everything is on Amazon.`, `Outfit idea for the week: ${o.name.toLowerCase()}.`];
+    const links = opts.listLinks ? linkedItems(items).map((g) => `${itemLabel(g)}: ${g.affiliate_url}`).join("\n") : "";
+    const tags = (s.hashtags || "#ootd #outfitinspo #amazonfinds #amazonfashion").trim().split(/\s+/).slice(0, 4).join(" ");
+    const shop = url ? (dest === "home" ? `Shop my looks: ${url}` : `Shop this look: ${url}`) + (s.handle ? ` (also in my bio ${s.handle})` : " (also in my bio)") : (s.handle ? `Links in my bio ${s.handle}` : "Links in my bio");
+    return [pick(hooks), shop, links, `${(s.disclosure || DEFAULT_DISCLOSURE).trim()} #ad`, tags].filter(Boolean).join("\n\n");
+  }
   $("rlPreviewBtn").onclick = async () => {
     try { stopReelPreview(); await buildReelSpec(); $("rlPreviewWrap").classList.remove("hidden"); rl.stop = ReelEngine.preview($("rlPreview"), rl.spec, rl.assets, (t) => note("rlMsg", `Preview ${t.toFixed(1)}s / ${rl.spec.duration}s`)); $("rlPreviewWrap").scrollIntoView({ behavior: "smooth", block: "center" }); }
     catch (e) { note("rlMsg", e.message, true); }
@@ -2203,7 +2297,7 @@ const ReelEngine = (() => {
     try {
       const id = crypto.randomUUID(), base = `${state.uid}/reels/${id}`;
       await upload(`${base}.${rl.result.ext}`, rl.result.blob); await upload(`${base}.jpg`, await ReelEngine.poster(rl.spec, rl.assets));
-      const o = state.outfits.find((x) => x.id === rl.spec.outfit_id); const caption = reelCaption(o, false);   // shop link + disclosure, no long URL list
+      const o = state.outfits.find((x) => x.id === rl.spec.outfit_id); const caption = reelCaption(o, { dest: "outfit" });   // outfit page link + disclosure, no URL list
       const { error } = await sb.from("reels").insert({ id, outfit_id: rl.spec.outfit_id, collage_id: rl.spec.collage_id, name: o.name, template: rl.spec.template, theme: rl.theme, duration_s: rl.spec.duration, caption, links: rl.spec.links, path: `${base}.${rl.result.ext}`, poster_path: `${base}.jpg`, mime: rl.result.mime, size_bytes: rl.result.blob.size, width: ReelEngine.W, height: ReelEngine.H });
       if (error) throw new Error(error.message);
       await loadAll(); renderReelsTab(); note("rlMsg", "Saved. Find it under Saved reels — open it for caption, links and sharing.");
@@ -2223,21 +2317,26 @@ const ReelEngine = (() => {
       ${stale ? '<p class="kv" style="color:var(--danger)">Product names or links changed since this video was rendered. The Shop the Look ending inside the video still shows the old text — render the reel again to update it. The caption below can use the latest saved details (Refresh caption).</p>' : ""}
       ${miss.length ? `<p class="kv" style="color:var(--danger)">${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${esc(miss.map(itemLabel).join(", "))}) ${miss.length > 1 ? "are" : "is"} left out of the caption. Add the details in My Clothing or the collage editor.</p>` : ""}
       <p class="kv" style="margin:8px 0">${link ? `Shop This Look page: <a href="${esc(link)}" id="rsOpenShop" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(link)}</a>` : "No Shop This Look page yet — save a collage for this outfit and one is created automatically."}</p>
-      <div class="stack"><label class="inline"><input type="checkbox" id="rsList"> Include individual Amazon links in the caption</label>
+      <div class="stack"><div><label>Shopping destination in the caption</label><div class="chips" id="rsDest"><button class="chip on" data-dest="outfit" ${link ? "" : "disabled"}>This outfit's page</button><button class="chip" data-dest="home">Storefront homepage</button><button class="chip" data-dest="none">No shopping link</button></div>
+          <p class="kv" style="margin:6px 0 0">One clean link only. The outfit page also lets people browse the rest of your storefront.</p></div>
+        <label class="inline"><input type="checkbox" id="rsList"> Also list individual Amazon links (off by default — Facebook may turn one of them into the post's link)</label>
         <div><label>Caption (shop link + disclosure)</label><textarea id="rsCap" style="min-height:140px">${esc(r.caption)}</textarea><p class="kv" style="margin:4px 0 0">Edit freely — press and hold to select, or tap Select all.</p></div>
         <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="rsSelect">Select all</button><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsCopyShop" ${link ? "" : "disabled"}>Copy shop link</button><button class="btn secondary small" id="rsRefresh">Refresh caption</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
-        <button class="btn" id="rsShare">Share video (Save to Photos)</button>
-        <p class="kv">To post: Save to Photos → open Instagram or Facebook → New Reel → pick the video → add music from their library → paste the caption. Instagram doesn't make caption links tappable, so keep the shop link in your bio too. Facebook Page posts made from the Studio include the shop link automatically; for your personal profile, share the video and paste the caption.</p>
+        <button class="btn" id="rsShare">Share video (caption copied for pasting)</button>
+        <p class="kv">The video is shared on its own as a real video, and the caption is copied to your clipboard. In Facebook or Instagram: New Reel (or New post) → pick the video → paste the caption. Keep the text and links out of the share sheet, otherwise Facebook can turn the post into a link post and send people to one product. Links in Reel captions aren't tappable everywhere, so keep your storefront link in your bio too.</p>
         <button class="btn danger" id="rsDel">Delete reel</button><div id="rsMsg" class="msg"></div></div>`);
     url(r.path).then((u) => { $("rsVideo").src = u; });
-    const regen = () => { if (!o) return; $("rsCap").value = reelCaption(o, $("rsList").checked); note("rsMsg", "Caption refreshed from the latest saved product details — tap Save caption to keep it."); };
+    let dest = link ? "outfit" : "home"; if (!link) $("rsDest").querySelector('[data-dest="home"]').classList.add("on"), $("rsDest").querySelector('[data-dest="outfit"]').classList.remove("on");
+    const regen = () => { if (!o) return; $("rsCap").value = reelCaption(o, { dest, listLinks: $("rsList").checked }); note("rsMsg", "Caption refreshed — tap Save caption to keep it."); };
+    $("rsDest").querySelectorAll("[data-dest]").forEach((b) => b.onclick = () => { dest = b.dataset.dest; $("rsDest").querySelectorAll("[data-dest]").forEach((k) => k.classList.toggle("on", k === b)); regen(); });
     $("rsList").onchange = regen; $("rsRefresh").onclick = regen;
     $("rsCopy").onclick = () => copyText($("rsCap").value, "rsMsg"); $("rsSelect").onclick = () => selectAllText($("rsCap"));
     $("rsCopyShop").onclick = () => copyText(link, "rsMsg");
     if ($("rsOpenShop")) $("rsOpenShop").onclick = (e) => { e.preventDefault(); openShopPreview(link); };
     $("rsSaveCap").onclick = async () => { const { error } = await sb.from("reels").update({ caption: $("rsCap").value }).eq("id", r.id).eq("user_id", state.uid); note("rsMsg", error ? error.message : "Caption saved.", !!error); if (!error) loadAll(); };
     $("rsShare").onclick = async () => { try { note("rsMsg", "Preparing…"); const blob = await blobOf(r.path); const file = new File([blob], `closetiq-reel.${r.path.endsWith(".webm") ? "webm" : "mp4"}`, { type: r.mime || "video/mp4" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: $("rsCap").value }); note("rsMsg", ""); } else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); note("rsMsg", "Downloaded."); } } catch (e) { if (e.name !== "AbortError") note("rsMsg", e.message, true); } };
+      try { await navigator.clipboard.writeText($("rsCap").value); } catch {}   // caption goes to the clipboard, NOT into the share — so the post stays a real video
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); note("rsMsg", "Video shared. Caption copied — paste it into the post."); } else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); note("rsMsg", "Downloaded. Caption copied — paste it into the post."); } } catch (e) { if (e.name !== "AbortError") note("rsMsg", e.message, true); } };
     $("rsDel").onclick = async () => { if (!confirm("Delete this reel?")) return; await removeFiles([r.path, r.poster_path]); await sb.from("reels").delete().eq("id", r.id); closeSheet(); await loadAll(); renderReelsTab(); };
   }
 
