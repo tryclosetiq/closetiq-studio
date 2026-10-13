@@ -115,6 +115,12 @@
   .layer.sel{outline:2px solid var(--ring);outline-offset:3px;border-radius:4px}
   .guide{position:absolute;background:var(--accent);opacity:.7;pointer-events:none;display:none}
   .guide.v{top:0;bottom:0;left:50%;width:1px} .guide.h{left:0;right:0;top:50%;height:1px}
+  /* Captions and fields must keep the normal iPhone press-and-hold selection (select all / copy / paste), even inside sheets. */
+  textarea,input[type=text],input[type=url]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+  /* In-app preview of a published Shop page: the editor stays open underneath, so nothing is lost. */
+  #shopPreview{position:fixed;inset:0;z-index:42;background:var(--bg);display:flex;flex-direction:column}
+  #shopPreview .ed-top{padding:calc(8px + env(safe-area-inset-top)) 12px 8px;margin:0;border-bottom:1px solid var(--line);background:var(--card)}
+  #shopPreview iframe{flex:1;width:100%;border:0;background:#fff}
   .tools{display:flex;gap:6px;overflow-x:auto;padding:8px 0 4px;scrollbar-width:none}
   .selp{display:flex;gap:10px;align-items:flex-start;margin:4px 0 8px} .selp .thumb{flex:0 0 64px;width:64px;height:80px;border-radius:10px;overflow:hidden;background:#fff;border:1px solid var(--line)} .selp .thumb img{width:100%;height:100%;object-fit:contain}
   .selp .f{flex:1;min-width:0;display:grid;gap:6px} .selp input{padding:9px 10px;font-size:15px} .nolink{color:var(--danger);font-size:13px;font-weight:600}
@@ -242,7 +248,7 @@
   <section id="tab-outfits" class="hidden">
     <h2>Saved Outfits</h2>
     <p class="hint">Group clothing into outfits and keep the links together.</p>
-    <button class="btn secondary" id="newOutfit">+ New outfit</button>
+    <div class="row"><button class="btn secondary" id="newOutfit">+ New outfit</button><button class="btn secondary" id="shopHomeBtn">Shop homepage</button></div>
     <div id="outfitList" class="stack" style="margin-top:12px"></div>
   </section>
 </main>
@@ -269,6 +275,7 @@
 </section>
 
 <!-- Collage editor -->
+<div id="shopPreview" class="hidden"><div class="ed-top"><button class="btn secondary small" id="spvClose">‹ Back to Studio</button><span class="kv" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="spvUrl"></span><a class="btn secondary small" id="spvOpen" target="_blank" rel="noopener">Open in browser</a></div><iframe id="spvFrame" title="Shop page preview"></iframe></div>
 <section id="editor" class="hidden">
   <div class="ed-top"><button class="btn secondary small" id="edClose">‹ Back</button><input id="edName" type="text" placeholder="Collage name" aria-label="Collage name"><button class="btn secondary small" id="edUndo" title="Undo">↶</button><button class="btn secondary small" id="edRedo" title="Redo">↷</button></div>
   <div class="chips" id="modeRow" style="margin-bottom:8px"><button class="chip" data-mode="clothing">Clothing only</button><button class="chip" data-mode="me">Me + outfit</button><button class="chip" data-mode="model">AI model + outfit</button></div>
@@ -1238,7 +1245,23 @@ const ReelEngine = (() => {
     };
   }
   // Display name for an item in captions / shop pages (never blank), and the subset that can actually be shopped.
-  const itemLabel = (g) => (g?.name || "").trim() || (g?.brand || "").trim() || (g?.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : "Item");
+  // Short, clean product name for shop pages and captions: first clause of the saved name (before a comma, dash,
+  // "that", "with", "for"), and if still long, the first three words plus the final word so the garment noun survives.
+  // The stored name is never changed — this is display only.
+  const GARMENT_NOUNS = /^(sweatshirts?|sweaters?|hoodies?|cardigans?|tops?|tees?|t-shirts?|shirts?|blouses?|tanks?|bodysuits?|jackets?|coats?|blazers?|vests?|leggings|pants|trousers|jeans|joggers|shorts|skirts?|dress(es)?|rompers?|jumpsuits?|sneakers?|boots?|heels|sandals|loafers|flats|mules|shoes?|socks?|bags?|totes?|purses?|clutch(es)?|backpacks?|belts?|scarf|scarves|hats?|caps?|beanies?|earrings?|necklaces?|bracelets?|rings?|watch(es)?|sunglasses|glasses|sets?|mini|midi|maxi)$/i;
+  const shortName = (name) => {
+    let s = String(name || "").trim().replace(/\s+/g, " ");
+    s = s.split(/\s*[,;|(]\s*|\s[-–—]\s|\s+(?:that|with|for|featuring|in a|in an)\s+/i)[0].trim().replace(/[.\s]+$/, "");
+    let w = s.split(" ").filter(Boolean);
+    let last = -1; w.forEach((x, i) => { if (GARMENT_NOUNS.test(x.replace(/[^a-z-]/gi, ""))) last = i; });   // cut after the last garment noun
+    if (last >= 0) w = w.slice(0, last + 1);
+    if (w.join(" ").length > 40 && w.length > 4) w = [...w.slice(0, 3), w[w.length - 1]];
+    s = w.join(" ");
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+  };
+  const itemLabel = (g) => shortName(g?.name) || (g?.brand || "").trim() || (g?.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : "Item");
+  // Which items belong on a public shop page: a real saved name (no category placeholders) and a picture.
+  const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && hasImage);
   const linkedItems = (items) => (items || []).filter((g) => g && g.affiliate_url);
   const missingInfo = (items) => (items || []).filter((g) => g && (!(g.name || "").trim() || !g.affiliate_url));
   // Links list for captions: ONLY items that have a link. Unlinked or unnamed items are never printed as ": (no link)".
@@ -1752,7 +1775,7 @@ const ReelEngine = (() => {
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   function captionCtx() { return { title: $("edName").value.trim() || "This outfit", items: collageItems(), s: state.settings, mode: ed.layout.mode }; }
   function genCaption(platform, tone, ctx) {
-    const { title, items, s } = ctx; const names = items.map((g) => (g.name || "").trim()).filter(Boolean);
+    const { title, items, s } = ctx; const names = items.map((g) => shortName(g.name)).filter(Boolean);   // short, clean names in captions; saved titles unchanged
     const list = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names.at(-1) : names[0] || "these pieces";
     const brands = [...new Set(items.map((g) => g.brand).filter(Boolean))];
     const me = ctx.mode === "me" ? " (yes, that's me in it)" : "";
@@ -1803,23 +1826,76 @@ const ReelEngine = (() => {
     const slug = sp?.slug || Math.random().toString(36).slice(2, 12), base = `${state.uid}/${slug}`;
     await uploadPublic(`${base}/collage.jpg`, await renderLayout(layout, 1080));
     const spots = await layoutHotspots(layout);
+    // Public list: only real products — a saved name (no "Tops"/"Accessory" placeholders) and a picture. Items without a
+    // name or picture are left off the page (they stay in the Studio untouched); a named item without a link shows as
+    // "Link coming soon".
     const items = [];
     for (const g of itemsIn) {
-      const common = { garment_id: g.id, name: itemLabel(g), brand: g.brand || "", url: g.affiliate_url || "", hotspot: spots[g.id] || null };
-      if (isApi(g)) { items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
+      if (!(g.name || "").trim()) continue;
+      const common = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: spots[g.id] || null };
+      if (isApi(g)) { if (!g.image_url) continue; items.push({ ...common, image_path: null, image_url: g.image_url, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
       let image_path = null;
       const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
       if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
+      if (!shopEligible(g, !!image_path)) continue;
       items.push({ ...common, image_path });
     }
-    const row = { collage_id: c.id, outfit_id: c.outfit_id || null, slug, title: opts.title || c.name || "This outfit", caption: opts.caption !== undefined ? (opts.caption || null) : (sp?.caption ?? null),
-      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString() };
+    // Homepage cover: the outfit's AI photo (the photo set as outfit cover) by default, the collage when chosen or when
+    // there is no photo. Always a plain copy of an existing image — publishing never generates anything or spends credits.
+    const prev = sp || {}; const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
+    const coverSource = opts.cover_source || prev.cover_source || "photo";
+    const hero = o ? state.generations.find((g) => g.id === o.hero_generation_id) : null;
+    let cover_public_path = `${base}/collage.jpg`;
+    if (coverSource === "photo" && hero) { try { await uploadPublic(`${base}/cover.jpg`, await shrink(await blobOf(hero.path), 1080, "image/jpeg", 0.88)); cover_public_path = `${base}/cover.jpg`; } catch (e) { console.warn("cover copy failed, using collage", e); } }
+    const row = { collage_id: c.id, outfit_id: c.outfit_id || null, slug, title: opts.title || prev.title || c.name || "This outfit", caption: opts.caption !== undefined ? (opts.caption || null) : (prev.caption ?? null),
+      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString(),
+      listed: prev.listed ?? true, featured: prev.featured ?? false, sort_order: prev.sort_order ?? 0, category: opts.category !== undefined ? opts.category : (prev.category ?? null),
+      cover_source: coverSource, cover_public_path, storefront_url: state.settings.amazon_storefront_url || null };
     const write = (r) => sp ? sb.from("shop_pages").update(r).eq("id", sp.id).eq("user_id", state.uid) : sb.from("shop_pages").insert(r);
     let { error } = await write(row);
-    if (error && /outfit_id/.test(error.message)) { const { outfit_id, ...legacy } = row; ({ error } = await write(legacy)); }   // database not migrated yet: page still works, found through its collage
+    // Database not migrated yet for some column: drop just that column and retry, so publishing keeps working.
+    for (let i = 0; error && i < 10; i++) { const m = /'([a-z_]+)' column/i.exec(error.message) || /column "?([a-z_]+)"?/i.exec(error.message); if (!m || !(m[1] in row)) break; delete row[m[1]]; ({ error } = await write(row)); }
     if (error) throw new Error(error.message);
     await loadAll(); return shopFor(c);
   }
+  // Homepage management helpers (all plain row updates on the owner's own shop pages — no rendering, no credits).
+  const SHOP_HOME = SHOP_BASE.replace(/\?o=$/, "");
+  const SHOP_CATEGORIES = ["Everyday Casual", "Workwear", "Date Night", "Going Out", "Vacation", "Athleisure"];
+  const pubUrl = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
+  async function updateShopPage(sp, patch) { const { error } = await sb.from("shop_pages").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); }
+  function shopHomeSheet() {
+    const pages = [...state.shops].sort((a, b) => (b.featured - a.featured) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || (new Date(b.updated_at) - new Date(a.updated_at)));
+    const store = state.settings.amazon_storefront_url || "";
+    openSheet(`<h3>Shop homepage</h3>
+      <p class="hint">One public page for your bios. Every published outfit is added automatically; use the switches to hide, feature or re-order, and pick the cover. Visitors see only published outfits.</p>
+      <div class="row" style="flex-wrap:wrap;margin-bottom:10px"><button class="btn small" id="shhCopy">Copy homepage link</button><button class="btn secondary small" id="shhOpen">Preview homepage</button></div>
+      <p class="kv" style="word-break:break-all">${esc(SHOP_HOME)}</p>
+      <p class="kv">${store ? `Amazon Storefront button: <span style="word-break:break-all">${esc(store)}</span>` : "No Amazon Storefront link yet — add it under Account (tap the ClosetIQ Studio title)."}</p>
+      <div class="stack" id="shhList">${pages.map((p) => { const c = state.collages.find((x) => x.id === p.collage_id); const o = p.outfit_id ? state.outfits.find((x) => x.id === p.outfit_id) : (c?.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null); const hero = o && state.generations.find((g) => g.id === o.hero_generation_id);
+        return `<div class="card" data-sp="${p.id}" style="margin:0"><div class="row" style="align-items:flex-start">
+          <div style="flex:0 0 72px"><div class="tile" style="width:72px;aspect-ratio:4/5"><img src="${p.published && p.cover_public_path ? esc(pubUrl(p.cover_public_path)) + "?v=" + encodeURIComponent(p.updated_at) : ""}" alt=""></div></div>
+          <div style="flex:1;min-width:0;display:grid;gap:6px">
+            <input type="text" data-f="title" value="${esc(p.title)}" placeholder="Display title" aria-label="Display title">
+            <select data-f="category" aria-label="Category"><option value="">No category</option>${SHOP_CATEGORIES.map((k) => `<option ${p.category === k ? "selected" : ""}>${k}</option>`).join("")}</select>
+            <label class="inline"><input type="checkbox" data-f="listed" ${p.listed !== false ? "checked" : ""}> Show on homepage</label>
+            <label class="inline"><input type="checkbox" data-f="featured" ${p.featured ? "checked" : ""}> Feature at the top</label>
+            <div class="chips"><button class="chip ${(p.cover_source || "photo") === "photo" ? "on" : ""}" data-cover="photo" ${hero ? "" : "disabled"}>Cover: AI photo${hero ? "" : " (none set)"}</button><button class="chip ${p.cover_source === "collage" ? "on" : ""}" data-cover="collage">Cover: collage</button></div>
+            <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" data-act="save">Save</button><button class="btn secondary small" data-act="open">Open page</button>${p.published ? '<button class="btn danger small" data-act="unpub">Unpublish</button>' : (c ? '<button class="btn small" data-act="repub">Republish</button>' : "")}</div>
+            <p class="kv">${p.published ? "Published" : "Unpublished (kept, not public)"}${o ? " · outfit: " + esc(o.name) : ""}${hero ? "" : " · set an outfit cover photo under My Photos to use an AI photo cover"}</p>
+          </div></div></div>`; }).join("") || '<div class="empty">No shop pages yet — save an outfit collage and its page is created automatically.</div>'}</div>
+      <div id="shhMsg" class="msg"></div>`);
+    $("shhCopy").onclick = () => copyText(SHOP_HOME, "shhMsg"); $("shhOpen").onclick = () => openShopPreview(SHOP_HOME);
+    $("shhList").querySelectorAll("[data-sp]").forEach((card) => {
+      const sp = state.shops.find((x) => x.id === card.dataset.sp); const c = state.collages.find((x) => x.id === sp.collage_id);
+      const f = (k) => card.querySelector(`[data-f="${k}"]`);
+      card.querySelector('[data-act="save"]').onclick = async () => { try { await updateShopPage(sp, { title: f("title").value.trim() || sp.title, category: f("category").value || null, listed: f("listed").checked, featured: f("featured").checked }); note("shhMsg", "Saved — the homepage updates immediately."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } };
+      card.querySelector('[data-act="open"]').onclick = () => openShopPreview(shopLink(sp));
+      card.querySelectorAll("[data-cover]").forEach((b) => b.onclick = async () => { if (!c?.layout?.layers) { note("shhMsg", "This page's collage is gone — republish from a collage first.", true); return; } try { note("shhMsg", "Updating cover…"); await publishShopFor(c, c.layout, { cover_source: b.dataset.cover }); note("shhMsg", "Cover updated (no credits used)."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } });
+      const un = card.querySelector('[data-act="unpub"]'); if (un) un.onclick = async () => { if (!confirm("Unpublish this outfit? Its page and homepage card go offline; nothing is deleted and you can republish any time.")) return; try { await unpublishShop(sp); note("shhMsg", "Unpublished."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } };
+      const re = card.querySelector('[data-act="repub"]'); if (re) re.onclick = async () => { try { note("shhMsg", "Publishing…"); await publishShopFor(c, c.layout, {}); note("shhMsg", "Republished at the same link."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } };
+    });
+  }
+  $("shopHomeBtn").addEventListener("click", shopHomeSheet);
   async function publishShop(caption) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title }); }
   // Keep published pages in sync after a product edit: every live page whose collage contains the item is re-published.
   async function syncShopPagesForGarment(gid) {
@@ -1831,13 +1907,23 @@ const ReelEngine = (() => {
     }
     return n;
   }
-  async function unpublishShop(sp) {
+  async function unpublishShop(sp) {   // page offline + public copies removed; the row (slug, title, settings) is kept for republishing
     const { data } = await sb.storage.from("shop").list(`${state.uid}/${sp.slug}`);
     if (data?.length) await sb.storage.from("shop").remove(data.map((f) => `${state.uid}/${sp.slug}/${f.name}`));
-    await sb.from("shop_pages").update({ published: false, collage_public_path: null, items: [], updated_at: new Date().toISOString() }).eq("id", sp.id);
+    let { error } = await sb.from("shop_pages").update({ published: false, collage_public_path: null, cover_public_path: null, items: [], updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid);
+    if (error && /cover_public_path/.test(error.message)) ({ error } = await sb.from("shop_pages").update({ published: false, collage_public_path: null, items: [], updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid));
+    if (error) throw new Error(error.message);
     await loadAll();
   }
   async function copyText(t, msgId) { try { await navigator.clipboard.writeText(t); note(msgId, "Copied."); } catch { note(msgId, "Copy failed — select the text and copy manually.", true); } }
+  // Select a whole caption so the iPhone Copy / Paste bubble appears right away (press-and-hold also works).
+  function selectAllText(el) { el.focus(); el.select(); try { el.setSelectionRange(0, el.value.length); } catch {} }
+  // Published Shop pages open INSIDE the Studio (iframe overlay) with a Back to Studio button; the editor stays untouched.
+  function openShopPreview(link) {
+    const u = new URL(link); u.searchParams.set("from", "studio"); u.searchParams.set("embed", "1");
+    $("spvFrame").src = u.toString(); $("spvUrl").textContent = link; $("spvOpen").href = link; $("shopPreview").classList.remove("hidden");
+  }
+  $("spvClose").onclick = () => { $("shopPreview").classList.add("hidden"); $("spvFrame").src = "about:blank"; };
   $("edShare").onclick = async () => { if (ed.c._draft || ed.dirty) { if (!confirm(ed.c._draft ? "Save the collage first? Sharing and publishing need a saved collage." : "Save the collage first?")) return; await $("edSave").onclick(); if (ed.c._draft || ed.dirty) return; } shareSheet(); };
   function shareSheet() {
     const sp = shopFor(ed.c); const ctx = { ...captionCtx(), shop_url: sp?.published ? shopLink(sp) : "" }; let platform = "instagram", tone = "casual";
@@ -1847,7 +1933,8 @@ const ReelEngine = (() => {
       <div class="chips" id="capPlat"><button class="chip on" data-p="instagram">Instagram</button><button class="chip" data-p="facebook">Facebook</button><button class="chip" data-p="tiktok">TikTok</button></div>
       <div class="chips" id="capTone"><button class="chip on" data-t="casual">Casual</button><button class="chip" data-t="polished">Polished</button><button class="chip" data-t="playful">Playful</button><button class="chip" id="capRegen">↻ New wording</button></div>
       <textarea id="capText" style="min-height:150px"></textarea>
-      <div class="row"><button class="btn secondary small" id="capCopy">Copy caption</button><button class="btn secondary small" id="capLinks">Copy all links</button></div>
+      <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="capSelect">Select all</button><button class="btn secondary small" id="capCopy">Copy caption</button><button class="btn secondary small" id="capLinks">Copy all links</button></div>
+      <p class="kv">You can edit the caption above before copying or posting — press and hold to select, or tap Select all.</p>
       <hr style="border:0;border-top:1px solid var(--line)">
       <div class="kv">${sp?.published ? `Shop page is live: <a href="${esc(shopLink(sp))}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(shopLink(sp))}</a>` : "Shop page not published yet."}</div>
       <div class="row"><button class="btn" id="shPublish">${sp?.published ? "Update shop page" : "Publish shop page"}</button>${sp?.published ? '<button class="btn secondary" id="shUnpub">Unpublish</button>' : ""}</div>
@@ -1858,19 +1945,19 @@ const ReelEngine = (() => {
       <button class="btn secondary" id="shFacebook">Share to my personal profile (share sheet: image + caption + link)</button>
       <p class="kv">If Facebook drops the text: use Copy caption and Copy link, then paste into your post. Facebook's own share box opens as a fallback.</p>
       <button class="btn secondary" id="shImage">Save image to Photos</button>
-      <button class="btn secondary" id="shAmazon">Prepare for Amazon (images + product list)</button>
-      <p class="kv">Amazon has no publishing API; this exports the collage (4:5 and square) and copies the title, product names, ASINs and links so you can upload in the Amazon app / Creator Hub if your account is eligible.</p>
+      <button class="btn secondary" id="shAmazon">Amazon Storefront (shoppable photo / Idea List)</button>
+      <p class="kv">Amazon offers no authorized API for posting to a storefront, so nothing is posted automatically: this prepares the collage image and the product list for you to upload in the Amazon Influencer app or Creator Hub.</p>
       <div id="shMsg" class="msg"></div></div>`);
     const regen = () => { $("capText").value = genCaption(platform, tone, ctx); };
     $("capPlat").querySelectorAll(".chip").forEach((c) => c.onclick = () => { platform = c.dataset.p; $("capPlat").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); regen(); });
     $("capTone").querySelectorAll("[data-t]").forEach((c) => c.onclick = () => { tone = c.dataset.t; $("capTone").querySelectorAll("[data-t]").forEach((k) => k.classList.toggle("on", k === c)); regen(); });
     $("capRegen").onclick = regen; regen();
-    $("capCopy").onclick = () => copyText($("capText").value, "shMsg");
+    $("capCopy").onclick = () => copyText($("capText").value, "shMsg"); $("capSelect").onclick = () => selectAllText($("capText"));
     $("capLinks").onclick = () => copyText(linksText(ctx.title, "", ctx.items), "shMsg");
     $("shPublish").onclick = async () => { $("shPublish").disabled = true; note("shMsg", "Publishing…"); try { const p = await publishShop($("capText").value); note("shMsg", "Live at " + shopLink(p)); shareSheet(); } catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; } };
     if (sp?.published) {
       $("shUnpub").onclick = async () => { if (!confirm("Unpublish this shop page? The link will stop working.")) return; await unpublishShop(sp); shareSheet(); };
-      $("shCopyLink").onclick = () => copyText(shopLink(sp), "shMsg"); $("shOpen").href = shopLink(sp);
+      $("shCopyLink").onclick = () => copyText(shopLink(sp), "shMsg"); $("shOpen").href = shopLink(sp); $("shOpen").onclick = (e) => { e.preventDefault(); openShopPreview(shopLink(sp)); };
     }
     $("shFbPost").onclick = async () => {
       const link = sp?.published ? shopLink(sp) : "";
@@ -1895,15 +1982,29 @@ const ReelEngine = (() => {
       if (link) window.open("https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(link), "_blank"); else note("shMsg", "Caption copied. Publish the shop page to share a link, or save the image and post it as a photo.", false);
     };
     $("shImage").onclick = async () => { const blob = await renderLayout(ed.layout, 2160); await saveToPhotos(blob, `${ctx.title.replace(/\W+/g, "-")}.jpg`); };
-    $("shAmazon").onclick = async () => {
-      note("shMsg", "Preparing…");
-      const pack = [ctx.title, "", ...linkedItems(ctx.items).map((g) => `${itemLabel(g)}${g.brand && (g.name || "").trim() ? " — " + g.brand : ""}${g.asin ? " · ASIN " + g.asin : ""}\n${g.affiliate_url}`), "", $("capText").value].join("\n");
-      await copyText(pack, "shMsg");
-      const portrait = await renderLayout({ ...ed.layout, size: "portrait" }, 2160), square = await renderLayout({ ...ed.layout, size: "square" }, 2160);
-      const files = [new File([portrait], "outfit-4x5.jpg", { type: "image/jpeg" }), new File([square], "outfit-square.jpg", { type: "image/jpeg" })];
-      if (navigator.canShare && navigator.canShare({ files })) { try { await navigator.share({ files }); } catch {} } else await saveToPhotos(portrait, "outfit-4x5.jpg");
-      note("shMsg", "Product list copied; images sent to Photos. Upload them in the Amazon app → Creator Hub.");
-    };
+    $("shAmazon").onclick = () => amazonStorefrontSheet(ctx, $("capText").value);
+  }
+  // Amazon Storefront: everything needed to post the collage as a shoppable photo or Idea List by hand. Amazon has no
+  // authorized API for storefront posts, so nothing is uploaded automatically. Links are the item's saved affiliate links.
+  function amazonStorefrontSheet(ctx, caption) {
+    const linked = linkedItems(ctx.items), missing = missingInfo(ctx.items);
+    const line = (g) => { const asin = g.asin || tagAmazon(g.affiliate_url, "").asin; return `${itemLabel(g)}${g.brand && (g.name || "").trim() ? " — " + g.brand : ""}${asin ? " · ASIN " + asin : " · (short link — search Amazon by name when tagging)"}\n${g.affiliate_url}`; };
+    const list = linked.map(line).join("\n\n");
+    openSheet(`<h3>Amazon Storefront</h3>
+      <p class="hint">1. Save the collage image. 2. In the Amazon Influencer app (or Creator Hub on desktop) create a <strong>Shoppable Photo</strong> — or an <strong>Idea List</strong> if photos aren't enabled for your account — and upload it. 3. Tag each product using the list below (ASINs make products easy to find). 4. Paste the caption.</p>
+      ${missing.length ? `<p class="kv" style="color:var(--danger)">${missing.length} item${missing.length > 1 ? "s" : ""} without a name or Amazon link (${esc(missing.map(itemLabel).join(", "))}) ${missing.length > 1 ? "are" : "is"} left out of the list.</p>` : ""}
+      <div class="stack">
+        <div class="row"><button class="btn" id="azSquare">Save image · 1:1</button><button class="btn secondary" id="azPortrait">Save image · 4:5</button></div>
+        <div><label>Products in this collage (${linked.length})</label><textarea id="azList" style="min-height:150px">${esc(list || "No linked products yet.")}</textarea></div>
+        <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="azCopyList">Copy product list</button><button class="btn secondary small" id="azCopyLinks">Copy all product links</button><button class="btn secondary small" id="azCopyCap">Copy caption</button></div>
+        <p class="kv">Amazon shoppable photos take JPG images in 1:1 or 4:5. The affiliate links above are your existing saved links, unchanged.</p>
+        <div id="azMsg" class="msg"></div></div>`);
+    const save = async (size, name) => { try { note("azMsg", "Rendering…"); const blob = await renderLayout({ ...ed.layout, size }, 2160); await saveToPhotos(blob, name); note("azMsg", "Image ready — upload it in the Amazon app."); } catch (e) { note("azMsg", e.message, true); } };
+    $("azSquare").onclick = () => save("square", `${ctx.title.replace(/\W+/g, "-")}-1x1.jpg`);
+    $("azPortrait").onclick = () => save("portrait", `${ctx.title.replace(/\W+/g, "-")}-4x5.jpg`);
+    $("azCopyList").onclick = () => copyText($("azList").value, "azMsg");
+    $("azCopyLinks").onclick = () => copyText(linked.map((g) => g.affiliate_url).join("\n"), "azMsg");
+    $("azCopyCap").onclick = () => copyText(caption, "azMsg");
   }
 
   // ================================================================== DISCOVER (AI outfit ideas + Amazon Creators API when available)
@@ -2121,18 +2222,19 @@ const ReelEngine = (() => {
       <p class="kv">${(r.size_bytes / 1048576).toFixed(1)} MB · ${esc(r.mime || "")} · ${esc(fmtWhen(r.created_at))}</p>
       ${stale ? '<p class="kv" style="color:var(--danger)">Product names or links changed since this video was rendered. The Shop the Look ending inside the video still shows the old text — render the reel again to update it. The caption below can use the latest saved details (Refresh caption).</p>' : ""}
       ${miss.length ? `<p class="kv" style="color:var(--danger)">${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${esc(miss.map(itemLabel).join(", "))}) ${miss.length > 1 ? "are" : "is"} left out of the caption. Add the details in My Clothing or the collage editor.</p>` : ""}
-      <p class="kv" style="margin:8px 0">${link ? `Shop This Look page: <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(link)}</a>` : "No Shop This Look page yet — save a collage for this outfit and one is created automatically."}</p>
+      <p class="kv" style="margin:8px 0">${link ? `Shop This Look page: <a href="${esc(link)}" id="rsOpenShop" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(link)}</a>` : "No Shop This Look page yet — save a collage for this outfit and one is created automatically."}</p>
       <div class="stack"><label class="inline"><input type="checkbox" id="rsList"> Include individual Amazon links in the caption</label>
-        <div><label>Caption (shop link + disclosure)</label><textarea id="rsCap" style="min-height:140px">${esc(r.caption)}</textarea></div>
-        <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsCopyShop" ${link ? "" : "disabled"}>Copy shop link</button><button class="btn secondary small" id="rsRefresh">Refresh caption</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
+        <div><label>Caption (shop link + disclosure)</label><textarea id="rsCap" style="min-height:140px">${esc(r.caption)}</textarea><p class="kv" style="margin:4px 0 0">Edit freely — press and hold to select, or tap Select all.</p></div>
+        <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="rsSelect">Select all</button><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsCopyShop" ${link ? "" : "disabled"}>Copy shop link</button><button class="btn secondary small" id="rsRefresh">Refresh caption</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
         <button class="btn" id="rsShare">Share video (Save to Photos)</button>
         <p class="kv">To post: Save to Photos → open Instagram or Facebook → New Reel → pick the video → add music from their library → paste the caption. Instagram doesn't make caption links tappable, so keep the shop link in your bio too. Facebook Page posts made from the Studio include the shop link automatically; for your personal profile, share the video and paste the caption.</p>
         <button class="btn danger" id="rsDel">Delete reel</button><div id="rsMsg" class="msg"></div></div>`);
     url(r.path).then((u) => { $("rsVideo").src = u; });
     const regen = () => { if (!o) return; $("rsCap").value = reelCaption(o, $("rsList").checked); note("rsMsg", "Caption refreshed from the latest saved product details — tap Save caption to keep it."); };
     $("rsList").onchange = regen; $("rsRefresh").onclick = regen;
-    $("rsCopy").onclick = () => copyText($("rsCap").value, "rsMsg");
+    $("rsCopy").onclick = () => copyText($("rsCap").value, "rsMsg"); $("rsSelect").onclick = () => selectAllText($("rsCap"));
     $("rsCopyShop").onclick = () => copyText(link, "rsMsg");
+    if ($("rsOpenShop")) $("rsOpenShop").onclick = (e) => { e.preventDefault(); openShopPreview(link); };
     $("rsSaveCap").onclick = async () => { const { error } = await sb.from("reels").update({ caption: $("rsCap").value }).eq("id", r.id).eq("user_id", state.uid); note("rsMsg", error ? error.message : "Caption saved.", !!error); if (!error) loadAll(); };
     $("rsShare").onclick = async () => { try { note("rsMsg", "Preparing…"); const blob = await blobOf(r.path); const file = new File([blob], `closetiq-reel.${r.path.endsWith(".webm") ? "webm" : "mp4"}`, { type: r.mime || "video/mp4" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: $("rsCap").value }); note("rsMsg", ""); } else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); note("rsMsg", "Downloaded."); } } catch (e) { if (e.name !== "AbortError") note("rsMsg", e.message, true); } };
@@ -2223,6 +2325,7 @@ const ReelEngine = (() => {
       <div><label>Affiliate disclosure</label><textarea id="setDisc">${esc(s.disclosure || DEFAULT_DISCLOSURE)}</textarea></div>
       <div><label>Default hashtags</label><input type="text" id="setTags" value="${esc(s.hashtags)}" placeholder="#ootd #amazonfinds #amazonfashion"></div>
       <div><label>Social handle (optional)</label><input type="text" id="setHandle" value="${esc(s.handle)}" placeholder="@yourhandle" autocapitalize="none"></div>
+      <div><label>Amazon Storefront link (shown on your shopping homepage)</label><input type="url" id="setStore" value="${esc(s.amazon_storefront_url || "")}" placeholder="https://www.amazon.com/shop/yourname" inputmode="url" autocapitalize="none"></div>
       <button class="btn" id="setSave">Save settings</button>
       <button class="btn secondary" id="setRetag">Re-tag all saved Amazon links with this ID</button>
       <h3>Password</h3>
@@ -2230,8 +2333,13 @@ const ReelEngine = (() => {
       <button class="btn secondary" id="changepw">Change password</button>
       <button class="btn secondary" id="logout">Sign out</button><div id="acctMsg" class="msg"></div></div>`);
     $("setSave").onclick = async () => {
-      const row = { user_id: state.uid, amazon_tag: $("setTag").value.trim() || null, disclosure: $("setDisc").value.trim() || DEFAULT_DISCLOSURE, hashtags: $("setTags").value.trim() || null, handle: $("setHandle").value.trim() || null, updated_at: new Date().toISOString() };
-      const { error } = await sb.from("studio_settings").upsert(row); note("acctMsg", error ? error.message : "Settings saved.", !!error); if (!error) state.settings = row;
+      const store = $("setStore").value.trim();
+      if (store && !/^https:\/\/([a-z0-9-]+\.)*amazon\.[a-z.]+\//i.test(store)) { note("acctMsg", "The storefront link should be an https://www.amazon.com/… address.", true); return; }
+      const row = { user_id: state.uid, amazon_tag: $("setTag").value.trim() || null, disclosure: $("setDisc").value.trim() || DEFAULT_DISCLOSURE, hashtags: $("setTags").value.trim() || null, handle: $("setHandle").value.trim() || null, amazon_storefront_url: store || null, updated_at: new Date().toISOString() };
+      let { error } = await sb.from("studio_settings").upsert(row);
+      if (error && /amazon_storefront_url/.test(error.message)) { const { amazon_storefront_url, ...legacy } = row; ({ error } = await sb.from("studio_settings").upsert(legacy)); if (!error && store) note("acctMsg", "Settings saved, but the storefront link needs the homepage database update first.", true); }
+      if (!(error && /amazon_storefront_url/.test(error.message))) note("acctMsg", error ? error.message : "Settings saved.", !!error);
+      if (!error) state.settings = row;
     };
     $("setRetag").onclick = async () => {
       const tag = $("setTag").value.trim(); if (!tag) { note("acctMsg", "Enter your tracking ID first.", true); return; }

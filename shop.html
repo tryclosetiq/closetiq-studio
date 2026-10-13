@@ -34,6 +34,16 @@
   .btn[aria-disabled=true]{opacity:.5;pointer-events:none}
   .foot{color:var(--muted);font-size:12px;text-align:center;margin-top:22px}
   .empty{text-align:center;color:var(--muted);padding:60px 0}
+  /* homepage grid */
+  .home-head{text-align:center;padding:6px 0 14px} .home-head .logo{font:600 34px/1 Fraunces,serif;letter-spacing:-.01em;margin:0} .home-head .tag{color:var(--muted);margin:6px 0 0;font-size:15px}
+  .store{display:flex;justify-content:center;margin:14px 0 4px} .store .btn{width:100%;max-width:360px;padding:13px 16px}
+  .chips{display:flex;gap:8px;overflow-x:auto;padding:12px 0 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch} .chips::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:8px 14px;font:500 14px "Inter Tight",sans-serif;cursor:pointer} .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:10px} @media (min-width:600px){.grid{grid-template-columns:repeat(3,1fr)}}
+  .card{display:block;text-decoration:none;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;position:relative}
+  .card .cv{aspect-ratio:4/5;width:100%;object-fit:cover;display:block;background:var(--soft)} .card .ct{padding:10px 12px 12px} .card .ti{font-weight:600;font-size:15px;line-height:1.25;margin:0} .card .cat{color:var(--muted);font-size:12px;margin:4px 0 0}
+  .card .feat{position:absolute;top:8px;left:8px;background:var(--accent);color:var(--accent-ink);font-size:11px;font-weight:600;padding:4px 8px;border-radius:999px}
+  .back{display:inline-block;margin:0 0 12px;color:var(--muted);text-decoration:none;font-size:14px}
 </style>
 </head>
 <body>
@@ -48,12 +58,47 @@
   const pub = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const page = document.getElementById("page");
-  const slug = new URLSearchParams(location.search).get("o") || "";
-  const { data: p } = slug ? await sb.from("shop_pages").select("title,caption,disclosure,collage_public_path,items,updated_at").eq("slug", slug).eq("published", true).maybeSingle() : { data: null };
-  if (!p) { page.innerHTML = '<div class="empty"><p class="brand">ClosetIQ Studio</p>This outfit is no longer available.</div>'; return; }
-  document.title = p.title + " · Shop This Outfit";
+  const qs = new URLSearchParams(location.search), slug = qs.get("o") || "";
+  // Opened from the Studio (new tab or the phone's home-screen app): offer a way back. Inside the Studio's own preview
+  // frame (embed=1) the Studio shows its own Back button, so none is added here.
+  if (qs.get("from") === "studio" && qs.get("embed") !== "1") {
+    const studio = location.href.replace(/shop\.html.*$/, "");
+    const bar = document.createElement("div"); bar.style.cssText = "position:sticky;top:0;z-index:5;padding:8px 0 10px;background:var(--bg)";
+    bar.innerHTML = `<a href="${esc(studio)}" class="btn" style="background:var(--card);color:var(--ink);border:1px solid var(--line)">‹ Back to Studio</a>`;
+    bar.querySelector("a").addEventListener("click", (e) => { if (history.length > 1 && document.referrer && document.referrer.startsWith(location.origin)) { e.preventDefault(); history.back(); } });
+    page.parentNode.insertBefore(bar, page);
+  }
   const ok = (u) => /^https:\/\/([a-z0-9-]+\.)*(amazon\.[a-z.]+|amzn\.(to|com|eu|asia|in)|a\.co)\//i.test(u || "");
-  page.innerHTML = `<p class="brand">Shop this outfit</p><h1>${esc(p.title)}</h1>${p.caption ? `<p class="cap">${esc(p.caption)}</p>` : ""}
+  const home = location.pathname.split("/").pop() || "shop.html";
+  // ---------------------------------------------------------------- homepage (no outfit in the address): grid of published outfits
+  if (!slug) {
+    document.title = "ClosetIQ · Shop the looks";
+    let { data: rows, error } = await sb.from("shop_pages").select("slug,title,category,featured,listed,sort_order,cover_public_path,collage_public_path,storefront_url,updated_at").eq("published", true);
+    if (error) ({ data: rows } = await sb.from("shop_pages").select("slug,title,collage_public_path,updated_at").eq("published", true));   // before the homepage columns exist
+    rows = (rows || []).filter((r) => r.listed !== false && (r.cover_public_path || r.collage_public_path))
+      .sort((a, b) => ((b.featured ? 1 : 0) - (a.featured ? 1 : 0)) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || (new Date(b.updated_at) - new Date(a.updated_at)));
+    const store = (rows.map((r) => r.storefront_url).find(ok) || "");
+    const cats = [...new Set(rows.map((r) => (r.category || "").trim()).filter(Boolean))];
+    const card = (r) => `<a class="card" href="${home}?o=${encodeURIComponent(r.slug)}" data-cat="${esc(r.category || "")}">${r.featured ? '<span class="feat">Featured</span>' : ""}<img class="cv" src="${pub(r.cover_public_path || r.collage_public_path)}?v=${encodeURIComponent(r.updated_at)}" alt="${esc(r.title)}" loading="lazy"><div class="ct"><p class="ti">${esc(r.title)}</p>${r.category ? `<p class="cat">${esc(r.category)}</p>` : ""}</div></a>`;
+    page.innerHTML = `<div class="home-head"><p class="brand">ClosetIQ</p><h1 class="logo">Shop the looks</h1><p class="tag">Every outfit, every piece, one tap to Amazon.</p></div>
+      ${store ? `<div class="store"><a class="btn" href="${esc(store)}" target="_blank" rel="noopener sponsored">Visit my Amazon Storefront</a></div>` : ""}
+      ${cats.length ? `<div class="chips" id="cats"><button class="chip on" data-c="">All</button>${cats.map((c) => `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>` : ""}
+      ${rows.length ? `<div class="grid" id="grid">${rows.map(card).join("")}</div>` : '<div class="empty">No outfits published yet — check back soon.</div>'}
+      <p class="disc" style="margin-top:18px">${esc((rows[0] && rows[0].disclosure) || "As an Amazon Associate I earn from qualifying purchases.")}</p>`;
+    const chips = document.getElementById("cats"); if (chips) chips.querySelectorAll(".chip").forEach((b) => b.onclick = () => { chips.querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === b)); document.querySelectorAll("#grid .card").forEach((c) => { c.style.display = !b.dataset.c || c.dataset.cat === b.dataset.c ? "" : "none"; }); });
+    return;
+  }
+  const { data: p } = await sb.from("shop_pages").select("title,caption,disclosure,collage_public_path,items,updated_at").eq("slug", slug).eq("published", true).maybeSingle();
+  if (!p) { page.innerHTML = `<div class="empty"><p class="brand">ClosetIQ Studio</p>This outfit is no longer available.<br><br><a class="btn" href="${home}">See all outfits</a></div>`; return; }
+  document.title = p.title + " · Shop This Outfit";
+  // Short, clean product name (first clause; if still long, first three words + the final word). Display only.
+  const GARMENT_NOUNS = /^(sweatshirts?|sweaters?|hoodies?|cardigans?|tops?|tees?|t-shirts?|shirts?|blouses?|tanks?|bodysuits?|jackets?|coats?|blazers?|vests?|leggings|pants|trousers|jeans|joggers|shorts|skirts?|dress(es)?|rompers?|jumpsuits?|sneakers?|boots?|heels|sandals|loafers|flats|mules|shoes?|socks?|bags?|totes?|purses?|clutch(es)?|backpacks?|belts?|scarf|scarves|hats?|caps?|beanies?|earrings?|necklaces?|bracelets?|rings?|watch(es)?|sunglasses|glasses|sets?|mini|midi|maxi)$/i;
+  const shortName = (name) => { let s = String(name || "").trim().replace(/\s+/g, " "); s = s.split(/\s*[,;|(]\s*|\s[-–—]\s|\s+(?:that|with|for|featuring|in a|in an)\s+/i)[0].trim().replace(/[.\s]+$/, ""); let w = s.split(" ").filter(Boolean); let last = -1; w.forEach((x, i) => { if (GARMENT_NOUNS.test(x.replace(/[^a-z-]/gi, ""))) last = i; }); if (last >= 0) w = w.slice(0, last + 1); if (w.join(" ").length > 40 && w.length > 4) w = [...w.slice(0, 3), w[w.length - 1]]; s = w.join(" "); return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; };
+  // Only real products are listed: a saved name (not a category placeholder like "Tops" or "Accessory") and a picture.
+  const placeholder = /^(tops?|bottoms?|shoes?|accessor(y|ies)|dress(es)?|outerwear|bags?|jewel(le)?ry|item|one-pieces?|accessory)$/i;
+  const items = (p.items || []).filter((it) => it && (it.image_path || it.image_url) && String(it.name || "").trim() && !placeholder.test(String(it.name).trim())).map((it) => ({ ...it, name: shortName(it.name) }));
+  p.items = items;
+  page.innerHTML = `<a class="back" href="${home}${qs.get("from") === "studio" ? "?from=studio" + (qs.get("embed") === "1" ? "&embed=1" : "") : ""}">‹ All outfits</a><p class="brand">Shop this outfit</p><h1>${esc(p.title)}</h1>${p.caption ? `<p class="cap">${esc(p.caption)}</p>` : ""}
     ${p.collage_public_path ? `<div class="herowrap"><img class="hero" src="${pub(p.collage_public_path)}" alt="${esc(p.title)}">${(p.items || []).filter((it) => it.hotspot && ok(it.url)).map((it) => `<a class="hot" href="${esc(it.url)}" target="_blank" rel="noopener sponsored" aria-label="Shop ${esc(it.name)} on Amazon" style="left:${(it.hotspot.x * 100).toFixed(2)}%;top:${(it.hotspot.y * 100).toFixed(2)}%;width:${(it.hotspot.w * 100).toFixed(2)}%;height:${(it.hotspot.h * 100).toFixed(2)}%"></a>`).join("")}</div>` : ""}
     <p class="disc">${esc(p.disclosure)}</p>
     ${(p.items || []).map((it) => { const fresh = it.price && it.price_at && Date.now() - new Date(it.price_at).getTime() < 24 * 3600e3;
