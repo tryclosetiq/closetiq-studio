@@ -2243,6 +2243,9 @@ const ReelEngine = (() => {
 
   // ================================================================== FACEBOOK (Page queue + profile sharing)
   const fbPost = (id) => state.fbPosts.find((p) => p.id === id);
+  // Link to a published Page post. Posts are photo posts, and Facebook serves the photo's own URL reliably (the post
+  // permalink returned by the API shows "This isn't available" for these Page photo posts), so prefer the photo id.
+  const fbLink = (p) => p.fb_photo_id ? `https://www.facebook.com/photo.php?fbid=${encodeURIComponent(p.fb_photo_id)}` : (p.permalink || (p.fb_post_id ? `https://www.facebook.com/${encodeURIComponent(p.fb_post_id)}` : "https://www.facebook.com/"));
   const toLocalInput = (d) => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 16); };
   const STATUS_LABEL = { draft: "Draft — needs your approval", approved: "Approved — ready to post or schedule", scheduled: "Scheduled", published: "Published", failed: "Failed", cancelled: "Cancelled" };
   $("fbQueueBtn").addEventListener("click", fbQueueSheet);
@@ -2276,7 +2279,7 @@ const ReelEngine = (() => {
           <button class="btn secondary" id="fbSchedule">Schedule</button>` : ""}
         ${scheduled ? `<div><label>Change time</label><input type="datetime-local" id="fbWhen" value="${toLocalInput(new Date(p.scheduled_for))}" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:transparent"></div>
           <div class="row"><button class="btn" id="fbUpdate">Save changes on Facebook</button><button class="btn danger" id="fbCancel">Cancel post</button></div>` : ""}
-        ${published ? `<a class="btn" href="${esc(p.permalink || "https://www.facebook.com/" + (p.fb_post_id || ""))}" target="_blank" rel="noopener">Open on Facebook</a>
+        ${published ? `<a class="btn" href="${esc(fbLink(p))}" target="_blank" rel="noopener">Open on Facebook</a>
           <button class="btn secondary" id="fbProfile">Share to my personal profile</button>` : ""}
         ${p.status === "failed" ? `<p class="kv" style="color:var(--danger)">${esc(p.error || "")}</p><button class="btn secondary small" id="fbRetry">Back to approved (retry)</button>` : ""}
         ${!published && !scheduled ? '<button class="btn danger small" id="fbDelete">Delete post</button>' : ""}
@@ -2308,8 +2311,8 @@ const ReelEngine = (() => {
     if ($("fbProfile")) $("fbProfile").onclick = async () => {
       openSheet(`<h3>Share to your personal profile</h3><p class="hint">Meta doesn't allow apps to post to personal profiles, so this is a one-tap manual share.</p>
         <div class="stack">
-          <a class="btn" href="${esc(p.permalink || "https://www.facebook.com/" + (p.fb_post_id || ""))}" target="_blank" rel="noopener">1 · Open the Page post in Facebook</a>
-          <p class="kv">2 · Tap <b>Share</b> under the post → <b>Share to Feed</b> → make sure it's sharing as <b>you</b> (your Digital Creator profile), add a line if you like → <b>Post</b>.</p>
+          <a class="btn" href="${esc(fbLink(p))}" target="_blank" rel="noopener">1 · Open the Page post in Facebook</a>
+          <p class="kv">2 · Tap <b>Share</b> under the photo → <b>Share to Feed</b> → make sure it's sharing as <b>you</b> (your Digital Creator profile), add a line if you like → <b>Post</b>. If Facebook asks you to log in first, log in and the post opens.</p>
           <p class="kv">The share keeps the collage, your caption and the affiliate links from the Page post. Alternatively:</p>
           <button class="btn secondary" id="fbShareSheet">Share image + caption via the iPhone share sheet</button><div id="fbpMsg" class="msg"></div></div>`);
       $("fbShareSheet").onclick = async () => { try { const blob = await blobOf(p.image_path); const file = new File([blob], "outfit.jpg", { type: "image/jpeg" }); if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], text: p.caption }); else await copyText(p.caption, "fbpMsg"); } catch (e) { if (e.name !== "AbortError") note("fbpMsg", e.message, true); } };
