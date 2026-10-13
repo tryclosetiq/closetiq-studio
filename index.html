@@ -1444,8 +1444,10 @@ const ReelEngine = (() => {
     openSheet(`<h3>${esc(c.name)}</h3>
       <p class="kv" style="margin:0 0 10px">${esc(mode)} · ${items} item${items === 1 ? "" : "s"} · ${c.preview_path ? "saved " + esc(new Date(c.updated_at).toLocaleString()) : "never saved (opened " + esc(new Date(c.created_at).toLocaleString()) + ")"}${sp?.published ? " · Shop page published" : ""}</p>
       <div class="stack"><button class="btn" id="cmOpen">Open</button>
+        ${c.layout?.layers ? '<button class="btn secondary" id="cmAmazon">Share to Amazon</button>' : ""}
         <button class="btn danger" id="cmDel">Delete collage</button></div>`);
     $("cmOpen").onclick = () => { closeSheet(); openEditor(c); };
+    if ($("cmAmazon")) $("cmAmazon").onclick = () => amazonShareSheet(c, c.layout);
     $("cmDel").onclick = () => { closeSheet(); deleteCollages([c.id]); };
   }
   // Deletes ONLY the given collages (own rows, by id) and their preview images. Clothing, links, photos, models,
@@ -2043,8 +2045,8 @@ const ReelEngine = (() => {
       <button class="btn secondary" id="shFacebook">Share to my personal profile (share sheet: image + caption + link)</button>
       <p class="kv">If Facebook drops the text: use Copy caption and Copy link, then paste into your post. Facebook's own share box opens as a fallback.</p>
       <button class="btn secondary" id="shImage">Save image to Photos</button>
-      <button class="btn secondary" id="shAmazon">Amazon Storefront (shoppable photo / Idea List)</button>
-      <p class="kv">Amazon offers no authorized API for posting to a storefront, so nothing is posted automatically: this prepares the collage image and the product list for you to upload in the Amazon Influencer app or Creator Hub.</p>
+      <button class="btn secondary" id="shAmazon">Share to Amazon (storefront photo)</button>
+      <p class="kv">Amazon has no API for storefront posts, so nothing is posted automatically: this prepares a clean image, a short description and the products to tag, all on one screen.</p>
       <div id="shMsg" class="msg"></div></div>`);
     const regen = () => { $("capText").value = genCaption(platform, tone, ctx); };
     $("capPlat").querySelectorAll(".chip").forEach((c) => c.onclick = () => { platform = c.dataset.p; $("capPlat").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); regen(); });
@@ -2080,29 +2082,119 @@ const ReelEngine = (() => {
       if (link) window.open("https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(link), "_blank"); else note("shMsg", "Caption copied. Publish the shop page to share a link, or save the image and post it as a photo.", false);
     };
     $("shImage").onclick = async () => { const blob = await renderLayout(ed.layout, 2160); await saveToPhotos(blob, `${ctx.title.replace(/\W+/g, "-")}.jpg`); };
-    $("shAmazon").onclick = () => amazonStorefrontSheet(ctx, $("capText").value);
+    $("shAmazon").onclick = () => amazonShareSheet({ ...ed.c, name: $("edName").value.trim() || ed.c.name }, ed.layout);
   }
   // Amazon Storefront: everything needed to post the collage as a shoppable photo or Idea List by hand. Amazon has no
   // authorized API for storefront posts, so nothing is uploaded automatically. Links are the item's saved affiliate links.
-  function amazonStorefrontSheet(ctx, caption) {
-    const linked = linkedItems(ctx.items), missing = missingInfo(ctx.items);
-    const line = (g) => { const asin = g.asin || tagAmazon(g.affiliate_url, "").asin; return `${itemLabel(g)}${g.brand && (g.name || "").trim() ? " — " + g.brand : ""}${asin ? " · ASIN " + asin : " · (short link — search Amazon by name when tagging)"}\n${g.affiliate_url}`; };
-    const list = linked.map(line).join("\n\n");
-    openSheet(`<h3>Amazon Storefront</h3>
-      <p class="hint">1. Save the collage image. 2. In the Amazon Influencer app (or Creator Hub on desktop) create a <strong>Shoppable Photo</strong> — or an <strong>Idea List</strong> if photos aren't enabled for your account — and upload it. 3. Tag each product using the list below (ASINs make products easy to find). 4. Paste the caption.</p>
-      ${missing.length ? `<p class="kv" style="color:var(--danger)">${missing.length} item${missing.length > 1 ? "s" : ""} without a name or Amazon link (${esc(missing.map(itemLabel).join(", "))}) ${missing.length > 1 ? "are" : "is"} left out of the list.</p>` : ""}
+  // ================================================================== SHARE TO AMAZON (storefront photo kit — manual upload, no API)
+  // Amazon has no authorised API for posting to an Influencer storefront, so this prepares everything on one screen and the
+  // owner uploads it in the Amazon app. The export is a SEPARATE render (text overlays off, optional plain background); the
+  // saved collage, its preview, Shop pages and Facebook posts are never touched. Who is in the picture is worked out from
+  // the collage's person layers so the AI-people question at upload can be answered honestly — it is never pre-answered.
+  //   selfie              → your own photo, unedited
+  //   model (any kind)    → AI-generated person (presets, "AI me", AI models)
+  //   generation          → try-on result: with a selfie it is your photo edited by AI; without one it is an AI-generated person
+  const XMP_NS = "http://ns.adobe.com/xap/1.0/\0";
+  function withXmpKeywords(buf, keywords) {   // adds an XMP APP1 segment (dc:subject keywords) after the JPEG's APP0; pixels untouched
+    const src = new Uint8Array(buf); if (src[0] !== 0xff || src[1] !== 0xd8) return buf;
+    let at = 2; if (src[2] === 0xff && src[3] === 0xe0) at = 4 + ((src[4] << 8) | src[5]);   // skip JFIF APP0 if present
+    const li = keywords.map((k) => `<rdf:li>${esc(k)}</rdf:li>`).join("");
+    const packet = `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:subject><rdf:Bag>${li}</rdf:Bag></dc:subject></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
+    const body = new TextEncoder().encode(XMP_NS + packet), len = body.length + 2;
+    const out = new Uint8Array(src.length + 4 + body.length);
+    out.set(src.subarray(0, at), 0); out.set([0xff, 0xe1, len >> 8, len & 0xff], at); out.set(body, at + 4); out.set(src.subarray(at), at + 4 + body.length);
+    return out.buffer;
+  }
+  function peopleInLayout(layout) {
+    const out = [];
+    for (const l of layout?.layers || []) {
+      if (l.kind !== "person") continue;
+      const row = person(l.src, l.ref);
+      if (l.src === "selfie") out.push({ kind: "real", who: row?.label || "Your photo" });
+      else if (l.src === "model") out.push({ kind: "ai", who: row?.name || "AI model" });
+      else if (row && row.selfie_id) out.push({ kind: "edited", who: "Try-on of your photo" });
+      else out.push({ kind: "ai", who: "AI try-on model" });
+    }
+    return out;
+  }
+  async function saveFile(blob, name) {   // share sheet on iPhone (Save Image / AirDrop / Files), plain download elsewhere
+    const file = new File([blob], name, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return "shared"; }
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); return "downloaded";
+  }
+  function amazonDescription(name, items) {   // names only; never claims a piece is tagged when it has no link
+    const names = items.map(itemLabel).filter(Boolean), n = names.length, linked = linkedItems(items).length;
+    const list = n > 3 ? `${names.slice(0, 2).join(", ")} and more` : n > 1 ? `${names.slice(0, -1).join(", ")} and ${names[n - 1]}` : names[0] || "";
+    const title = String(name || "").trim();
+    const cta = !linked ? "" : linked === n ? "Every piece is tagged in this photo." : "Tap the tags to shop the linked pieces.";
+    return `${title && !/^untitled/i.test(title) ? title + ": " : ""}${list ? list.charAt(0).toUpperCase() + list.slice(1) + ". " : ""}${cta}`.trim();
+  }
+  function amazonShareSheet(c, layout) {
+    if (!layout?.layers) { alert("Open the collage and save it once first."); return; }
+    const title = (c?.name || "Collage").trim();
+    const items = [...new Set(layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
+    const linked = linkedItems(items), unlinked = items.filter((g) => !g.affiliate_url);
+    const people = peopleInLayout(layout), hasAi = people.some((p) => p.kind === "ai"), hasEdited = people.some((p) => p.kind === "edited");
+    const hasText = layout.layers.some((l) => l.kind === "text");
+    const opt = { size: layout.size === "square" ? "square" : "portrait", text: false, plain: false, tag: hasAi };
+    const store = (state.site && state.site.storefront_url) || state.settings.amazon_storefront_url || "";
+    const asinOf = (g) => g.asin || tagAmazon(g.affiliate_url || "", "").asin || "";
+    const peopleNote = !people.length
+      ? `<p class="kv"><strong>No people in this collage.</strong> Amazon's AI-people question at upload does not apply; answer "No" if it is asked.</p>`
+      : hasAi
+        ? `<p class="kv" style="color:var(--danger)"><strong>Contains an AI-generated person</strong> (${esc(people.filter((p) => p.kind === "ai").map((p) => p.who).join(", "))}). Answer <strong>Yes</strong> when Amazon asks whether the content shows AI-generated people. The export also carries Amazon's "contains-synthetic-performer" metadata keyword (optional below).</p>`
+        : hasEdited
+          ? `<p class="kv" style="color:var(--danger)"><strong>Your own photo, edited by AI</strong> (try-on). Amazon's published seller rule says not to label real people who were AI-edited, but the Influencer upload question has only been reported second-hand — read it and decide yourself. Nothing is pre-answered here.</p>`
+          : `<p class="kv"><strong>Your own photo, unedited.</strong> Not an AI-generated person; answer "No" to Amazon's AI-people question. (If the photo was retouched by AI elsewhere, decide for yourself.)</p>`;
+    const row = (g) => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt="" style="width:44px;height:44px;object-fit:contain;border-radius:8px;background:#f3efe8;flex:none"><div style="flex:1;min-width:0"><div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(itemLabel(g))}</div><div class="kv">${g.affiliate_url ? (asinOf(g) ? "ASIN " + esc(asinOf(g)) : "short link — search Amazon by name when tagging") : "no Amazon link — add one under Clothing to tag it"}</div></div>${g.affiliate_url ? `<button class="btn secondary small" data-asin="${esc(asinOf(g) || g.affiliate_url)}">Copy</button>` : ""}</div>`;
+    openSheet(`<h3>Share to Amazon</h3>
+      <p class="hint">Three steps, nothing is posted automatically: <strong>1.</strong> Save the image. <strong>2.</strong> In the Amazon app open your storefront → Upload → Shoppable photo and pick the saved image. <strong>3.</strong> Tag the products and paste the description.</p>
       <div class="stack">
-        <div class="row"><button class="btn" id="azSquare">Save image · 1:1</button><button class="btn secondary" id="azPortrait">Save image · 4:5</button></div>
-        <div><label>Products in this collage (${linked.length})</label><textarea id="azList" style="min-height:150px">${esc(list || "No linked products yet.")}</textarea></div>
-        <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="azCopyList">Copy product list</button><button class="btn secondary small" id="azCopyLinks">Copy all product links</button><button class="btn secondary small" id="azCopyCap">Copy caption</button></div>
-        <p class="kv">Amazon shoppable photos take JPG images in 1:1 or 4:5. The affiliate links above are your existing saved links, unchanged.</p>
+        <div><img id="azPrev" alt="Amazon export preview" style="width:100%;max-width:360px;display:block;margin:0 auto;border-radius:12px;background:#f3efe8;aspect-ratio:${opt.size === "square" ? "1/1" : "4/5"}">
+          <div class="chips" style="margin-top:8px" id="azOpts">
+            <button class="chip ${opt.size === "square" ? "on" : ""}" data-size="square">1:1</button><button class="chip ${opt.size === "portrait" ? "on" : ""}" data-size="portrait">4:5</button>
+            ${hasText ? '<button class="chip" data-opt="text">Keep text overlays</button>' : ""}
+            <button class="chip" data-opt="plain">Plain white background</button>
+          </div>
+          <p class="kv">This export is separate from your collage — the saved collage, its Shop page and Facebook posts stay exactly as they are.</p></div>
+        ${peopleNote}
+        ${people.length ? `<label class="row" style="align-items:center;gap:8px"><input type="checkbox" id="azTag" ${opt.tag ? "checked" : ""}> <span class="kv">Add Amazon's "contains-synthetic-performer" keyword to the file's metadata</span></label>` : ""}
+        <button class="btn" id="azSave">Save image for Amazon</button>
+        <div><label>Short description (edit freely)</label><textarea id="azDesc" style="min-height:84px">${esc(amazonDescription(title, items))}</textarea>
+          <div class="row" style="margin-top:6px"><button class="btn secondary small" id="azSelDesc">Select all</button><button class="btn secondary small" id="azCopyDesc">Copy description</button></div></div>
+        <div><label>Products to tag (${linked.length} with links${unlinked.length ? `, ${unlinked.length} without` : ""})</label>
+          <div id="azItems">${items.length ? items.map(row).join("") : '<p class="kv">No clothing items in this collage.</p>'}</div>
+          ${linked.length ? `<div class="row" style="flex-wrap:wrap;margin-top:6px"><button class="btn secondary small" id="azCopyAsins">Copy all ASINs</button><button class="btn secondary small" id="azCopyLinks">Copy all links</button></div>` : ""}</div>
+        <div class="row" style="flex-wrap:wrap">${store ? `<a class="btn secondary small" href="${esc(store)}" target="_blank" rel="noopener">Open my storefront</a>` : '<span class="kv">Add your storefront link under Storefront → About to get a shortcut here.</span>'}<a class="btn secondary small" href="https://affiliate-program.amazon.com/influencers" target="_blank" rel="noopener">Associates Central</a></div>
+        <p class="kv">Amazon shoppable photos take JPG images in 1:1 or 4:5. Product links above are your saved links, unchanged. Disclosure wording on Amazon's own pages: the "AI-generated people" upload question is reported by creators, not published by Amazon; the metadata keyword comes from Amazon's seller image rules.</p>
         <div id="azMsg" class="msg"></div></div>`);
-    const save = async (size, name) => { try { note("azMsg", "Rendering…"); const blob = await renderLayout({ ...ed.layout, size }, 2160); await saveToPhotos(blob, name); note("azMsg", "Image ready — upload it in the Amazon app."); } catch (e) { note("azMsg", e.message, true); } };
-    $("azSquare").onclick = () => save("square", `${ctx.title.replace(/\W+/g, "-")}-1x1.jpg`);
-    $("azPortrait").onclick = () => save("portrait", `${ctx.title.replace(/\W+/g, "-")}-4x5.jpg`);
-    $("azCopyList").onclick = () => copyText($("azList").value, "azMsg");
-    $("azCopyLinks").onclick = () => copyText(linked.map((g) => g.affiliate_url).join("\n"), "azMsg");
-    $("azCopyCap").onclick = () => copyText(caption, "azMsg");
+    fillImgs($("sheetBody"));
+    const exportLayout = () => ({ ...layout, size: opt.size, bg: opt.plain ? "#ffffff" : layout.bg, layers: layout.layers.filter((l) => opt.text || l.kind !== "text") });
+    let seq = 0;
+    const preview = async () => { const my = ++seq; try { const blob = await renderLayout(exportLayout(), 540); if (my !== seq) return; const img = $("azPrev"); if (!img) return; if (img.dataset.u) URL.revokeObjectURL(img.dataset.u); img.dataset.u = URL.createObjectURL(blob); img.src = img.dataset.u; img.style.aspectRatio = opt.size === "square" ? "1/1" : "4/5"; } catch (e) { note("azMsg", e.message, true); } };
+    $("azOpts").onclick = (e) => {
+      const b = e.target.closest(".chip"); if (!b) return;
+      if (b.dataset.size) { opt.size = b.dataset.size; $("azOpts").querySelectorAll("[data-size]").forEach((x) => x.classList.toggle("on", x === b)); }
+      else { opt[b.dataset.opt] = !opt[b.dataset.opt]; b.classList.toggle("on", opt[b.dataset.opt]); }
+      preview();
+    };
+    if ($("azTag")) $("azTag").onchange = () => { opt.tag = $("azTag").checked; };
+    $("azSave").onclick = async () => {
+      $("azSave").disabled = true; note("azMsg", "Rendering…");
+      try {
+        let blob = await renderLayout(exportLayout(), 2160);
+        if (opt.tag) blob = new Blob([withXmpKeywords(await blob.arrayBuffer(), ["contains-synthetic-performer"])], { type: "image/jpeg" });
+        const how = await saveFile(blob, `${title.replace(/\W+/g, "-")}-amazon-${opt.size === "square" ? "1x1" : "4x5"}.jpg`);
+        note("azMsg", how === "shared" ? "Image saved. Now upload it in the Amazon app and tag the products below." : "Image downloaded. Now upload it in the Amazon app and tag the products below.");
+      } catch (e) { if (e.name !== "AbortError") note("azMsg", e.message, true); else note("azMsg", ""); }
+      $("azSave").disabled = false;
+    };
+    $("azSelDesc").onclick = () => selectAllText($("azDesc"));
+    $("azCopyDesc").onclick = () => copyText($("azDesc").value, "azMsg");
+    $("azItems").querySelectorAll("[data-asin]").forEach((b) => b.onclick = () => copyText(b.dataset.asin, "azMsg"));
+    if ($("azCopyAsins")) $("azCopyAsins").onclick = () => copyText(linked.map((g) => asinOf(g) || `${itemLabel(g)}: ${g.affiliate_url}`).join("\n"), "azMsg");
+    if ($("azCopyLinks")) $("azCopyLinks").onclick = () => copyText(linked.map((g) => `${itemLabel(g)}: ${g.affiliate_url}`).join("\n"), "azMsg");
+    preview();
   }
 
   // ================================================================== DISCOVER (AI outfit ideas + Amazon Creators API when available)
