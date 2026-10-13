@@ -97,7 +97,7 @@
   .rlt{flex:0 0 72px;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:var(--soft);border:0;padding:0;background-size:cover;background-position:center}
   .rlt.sel{outline:3px solid var(--ring);outline-offset:-3px}
   /* ---- clothing importer (full screen) + crop tool ---- */
-  #importer{position:fixed;inset:0;z-index:30;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch;padding:calc(8px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
+  #importer{position:fixed;inset:0;z-index:32;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch;padding:calc(8px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
   .cropWrap{position:relative;display:flex;justify-content:center;align-items:center;width:100%;max-height:52dvh;background:#111;border-radius:12px;overflow:hidden;user-select:none;-webkit-user-select:none}
   .cropWrap img{display:block;max-width:100%;max-height:52dvh;width:auto;height:auto;pointer-events:none;-webkit-user-drag:none}
   .cropBox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.5);touch-action:none;cursor:move}
@@ -116,6 +116,9 @@
   .guide{position:absolute;background:var(--accent);opacity:.7;pointer-events:none;display:none}
   .guide.v{top:0;bottom:0;left:50%;width:1px} .guide.h{left:0;right:0;top:50%;height:1px}
   .tools{display:flex;gap:6px;overflow-x:auto;padding:8px 0 4px;scrollbar-width:none}
+  .selp{display:flex;gap:10px;align-items:flex-start;margin:4px 0 8px} .selp .thumb{flex:0 0 64px;width:64px;height:80px;border-radius:10px;overflow:hidden;background:#fff;border:1px solid var(--line)} .selp .thumb img{width:100%;height:100%;object-fit:contain}
+  .selp .f{flex:1;min-width:0;display:grid;gap:6px} .selp input{padding:9px 10px;font-size:15px} .nolink{color:var(--danger);font-size:13px;font-weight:600}
+  .linkrow{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;padding:8px 0;border-top:1px solid var(--line)} .linkrow:first-child{border-top:0} .linkrow .n{font-size:14px;font-weight:600;grid-column:1/3} .linkrow input{padding:9px 10px;font-size:14px}
   .tools::-webkit-scrollbar{display:none}
   .tools .btn{flex:0 0 auto;white-space:nowrap}
   .ed-bar{position:fixed;left:0;right:0;bottom:0;z-index:31;display:flex;gap:8px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line)}
@@ -271,6 +274,8 @@
   <div class="chips" id="modeRow" style="margin-bottom:8px"><button class="chip" data-mode="clothing">Clothing only</button><button class="chip" data-mode="me">Me + outfit</button><button class="chip" data-mode="model">AI model + outfit</button></div>
   <div class="stage" id="stage"><div class="guide v"></div><div class="guide h"></div></div>
   <div class="tools" id="selTools"></div>
+  <div id="selPanel"></div>
+  <input id="replaceFile" type="file" accept="image/*" class="hidden">
   <div class="tools" id="addTools"></div>
   <details class="ed" open><summary>Background & size</summary>
     <div class="row" style="flex-wrap:wrap;gap:8px" id="bgRow"></div>
@@ -925,7 +930,7 @@ const ReelEngine = (() => {
 
   // Import wizard (full-screen on iPhone): frame the product → optional AI extraction with preview → details → save.
   // The crop frame is measured against the DISPLAYED image, so the saved crop always matches what you see.
-  function closeImporter() { $("importer").classList.add("hidden"); $("iwBody").innerHTML = ""; document.body.style.overflow = ""; }
+  function closeImporter() { $("importer").classList.add("hidden"); $("iwBody").innerHTML = ""; document.body.style.overflow = $("editor").classList.contains("hidden") ? "" : "hidden"; }   // keep the editor's scroll lock when returning to it
   $("iwClose").onclick = closeImporter;
   async function importWizard(file, prefill = {}) {
     const srcUrl = URL.createObjectURL(file); const info = await looksClean(file);
@@ -939,10 +944,12 @@ const ReelEngine = (() => {
       <div id="iwPreviewWrap" class="card hidden" style="margin:0"><label>AI result</label><img class="big contain" id="iwPreview" alt="" style="max-height:40dvh"><div class="row" style="margin-top:8px"><button class="btn small" id="iwKeep">Keep</button><button class="btn secondary small" id="iwRetry">Retry · ${cost("extract")} credit</button><button class="btn secondary small" id="iwOrig">Use original</button></div></div>
       ${garmentFields()}
       <div id="iwMsg" class="msg"></div>`;
-    $("iwExtract").textContent = `Extract clothing · ${cost("extract")} credit`; $("iwExtract").disabled = info.clean; $("iwSave").disabled = false; $("iwSave").textContent = "Save to My Clothing";
+    const replacing = prefill.replaceGarmentId ? garment(prefill.replaceGarmentId) : null;   // Replace photo: update an existing item instead of creating one
+    $("iwExtract").textContent = `Extract clothing · ${cost("extract")} credit`; $("iwExtract").disabled = info.clean; $("iwSave").disabled = false; $("iwSave").textContent = replacing ? "Replace photo" : "Save to My Clothing";
     if (prefill.url) { $("gUrl").value = prefill.url; $("gUrlNote").textContent = tagAmazon(prefill.url, state.settings.amazon_tag).note; }
     if (prefill.category) $("gCat").value = prefill.category;
     if (prefill.name) $("gName").value = prefill.name;
+    if (replacing) { $("gBrand").value = replacing.brand || ""; $("gNotes").value = replacing.notes || ""; $("gPublic").checked = !!replacing.public_ok; $("iwBody").insertAdjacentHTML("afterbegin", `<p class="hint" style="margin:0 0 8px"><strong>Replacing the photo of “${esc(replacing.name)}”.</strong> Name, link and details below stay unless you change them.</p>`); }
     $("importer").classList.remove("hidden"); $("importer").scrollTop = 0; document.body.style.overflow = "hidden";
 
     const wrap = $("cropWrap"), box = $("cropBox"), img = $("cropImg");
@@ -985,7 +992,7 @@ const ReelEngine = (() => {
     $("iwSave").onclick = async () => {
       $("iwSave").disabled = true; note("iwMsg", "Saving…");
       try {
-        const id = crypto.randomUUID(), base = `${state.uid}/garments/${id}`;
+        const id = replacing ? replacing.id : crypto.randomUUID(), base = `${state.uid}/garments/${id}`;
         const [source, full, thumb] = await Promise.all([shrink(file, 1600), cropped(), shrink(file, 480, "image/jpeg", 0.8, crop)]);
         await upload(base + "_src.jpg", source); await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
         let cutout_path = null, cutNote = "";
@@ -994,8 +1001,12 @@ const ReelEngine = (() => {
           try { const t = await makeTransparent(cutout); if (!t.difficult) { await upload(base + "_c.png", t.blob); cutout_path = base + "_c.png"; } else cutNote = ` Transparent cutout skipped: ${t.reason}. The white version is used; AI background removal (${cost("bgremove")} credit) is available on the item.`; }
           catch (e) { cutNote = " Transparent cutout failed: " + e.message; }   // the white cutout is still saved
         }
-        const { error } = await sb.from("garments").insert({ id, source_path: base + "_src.jpg", path: base + ".jpg", thumb_path: base + "_t.jpg", cutout_path, ...readGarmentFields() });
+        const row = { source_path: base + "_src.jpg", path: base + ".jpg", thumb_path: base + "_t.jpg", cutout_path, ...readGarmentFields() };
+        // Replace mode: the same item row is updated in place (id, links to collages/outfits/shop pages unchanged); an old cutout is
+        // dropped from use when the new photo has none, so a stale picture can never show.
+        const { error } = replacing ? await sb.from("garments").update(row).eq("id", id).eq("user_id", state.uid) : await sb.from("garments").insert({ id, ...row });
         if (error) throw new Error(error.message);
+        for (const p of [base + ".jpg", base + "_t.jpg", base + "_src.jpg", base + "_x.png", base + "_c.png", base + "_t.png"]) { state.urls.delete(p); state.blobs.delete(p); }
         closeImporter(); await loadAll(); if (cutNote) alert("Saved." + cutNote);
         if (prefill.onSaved) prefill.onSaved(id); else showTab("clothing");
       } catch (e) { note("iwMsg", e.message, true); $("iwSave").disabled = false; }
@@ -1024,7 +1035,7 @@ const ReelEngine = (() => {
       } catch (e) { note("gMsg", e.message, true); }
     });
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
-    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
+    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) { await loadAll(); try { const n = await syncShopPagesForGarment(x.id); if (n) note("gMsg", `Saved. Shop This Look page${n > 1 ? "s" : ""} updated.`); } catch {} } };
     $("gTry").onclick = () => { state.sel.garment = x.id; state.sel.src = "path"; closeSheet(); renderPickers(); showTab("tryon"); };
     $("gExtract").onclick = () => spendAction("/extract", cost("extract"), "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
     $("gBg").onclick = () => spendAction("/bgremove", cost("bgremove"), "Remove the background from the extracted clothing (transparent PNG).", x);
@@ -1226,8 +1237,13 @@ const ReelEngine = (() => {
       closeSheet(); await loadAll(); outfitSheet(id);
     };
   }
+  // Display name for an item in captions / shop pages (never blank), and the subset that can actually be shopped.
+  const itemLabel = (g) => (g?.name || "").trim() || (g?.brand || "").trim() || (g?.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : "Item");
+  const linkedItems = (items) => (items || []).filter((g) => g && g.affiliate_url);
+  const missingInfo = (items) => (items || []).filter((g) => g && (!(g.name || "").trim() || !g.affiliate_url));
+  // Links list for captions: ONLY items that have a link. Unlinked or unnamed items are never printed as ": (no link)".
   function linksText(title, caption, items) {
-    return [title, caption || "", "", ...items.map((g) => `${g.name}${g.brand ? " — " + g.brand : ""}: ${g.affiliate_url || "(no link yet)"}`)].join("\n").trim();
+    return [title, caption || "", "", ...linkedItems(items).map((g) => `${itemLabel(g)}${g.brand && (g.name || "").trim() ? " — " + g.brand : ""}: ${g.affiliate_url}`)].join("\n").trim();
   }
   function outfitSheet(id) {
     const o = state.outfits.find((x) => x.id === id); if (!o) return;
@@ -1524,10 +1540,31 @@ const ReelEngine = (() => {
   }
   function isDark(bg) { if (designOf(bg)) return !!designOf(bg).dark; if (!/^#/.test(bg)) return false; const n = parseInt(bg.slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 110; }
   function collageItems() { return [...new Set(ed.layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean); }
+  // Items & links panel: every item on the collage with its Amazon link in an editable field. Links and names live on the
+  // clothing item itself (garments table), so a link added here also shows in My Clothing, Shop pages and captions.
+  // Links are never invented: an empty field stays empty and is flagged.
   function renderLinks() {
     const items = collageItems();
-    $("edLinks").textContent = items.length ? items.map((g) => `${g.name}${g.brand ? " — " + g.brand : ""}: ${g.affiliate_url || "(no link yet)"}`).join("\n") : "No items yet.";
+    $("edLinks").innerHTML = items.length ? items.map((g) => `<div class="linkrow" data-lg="${g.id}"><div class="n">${esc(itemLabel(g))}${g.brand && (g.name || "").trim() ? ` <span class="kv">— ${esc(g.brand)}</span>` : ""}${(g.name || "").trim() ? "" : ' <span class="nolink">· No name yet</span>'}${g.affiliate_url ? "" : ' <span class="nolink">· No Amazon link yet</span>'}</div>
+        <input type="url" value="${esc(g.affiliate_url || "")}" placeholder="Paste the Amazon product link" inputmode="url" autocapitalize="none" aria-label="Amazon link for ${esc(g.name)}"><button class="btn secondary small" data-savelink="${g.id}">Save</button></div>`).join("") : '<div class="kv">No items yet.</div>';
+    $("edLinks").querySelectorAll("[data-savelink]").forEach((b) => b.onclick = () => saveGarmentDetails(b.dataset.savelink, { url: b.parentElement.querySelector("input").value }, b));
     $("edCopyLinks").onclick = () => copyText(linksText($("edName").value, "", items), "edMsg");
+  }
+  // Save name/link edits for one clothing item (own row only). Returns true on success. Nothing else on the item changes.
+  async function saveGarmentDetails(gid, { name, url }, btn) {
+    const g = garment(gid); if (!g) return false;
+    const patch = {};
+    if (name != null && name.trim() && name.trim() !== g.name) patch.name = name.trim();
+    if (url != null) { const t = tagAmazon(url, state.settings.amazon_tag); const u = url.trim(); if (u !== (g.product_url || g.affiliate_url || "")) Object.assign(patch, { affiliate_url: u ? t.url : null, product_url: u || null, asin: u ? (t.asin || null) : null }); }
+    if (!Object.keys(patch).length) { note("edMsg", "No changes to save."); return true; }
+    if (btn) btn.disabled = true;
+    const { error } = await sb.from("garments").update(patch).eq("id", gid).eq("user_id", state.uid);
+    if (btn) btn.disabled = false;
+    if (error) { note("edMsg", "Could not save: " + error.message, true); return false; }
+    await loadAll(); renderLinks(); renderSelTools();
+    note("edMsg", patch.affiliate_url === null ? "Link removed." : patch.affiliate_url ? "Link saved" + (tagAmazon(url, state.settings.amazon_tag).note ? " — " + tagAmazon(url, state.settings.amazon_tag).note : ".") : "Saved.");
+    try { const n = await syncShopPagesForGarment(gid); if (n) note("edMsg", $("edMsg").textContent + ` Shop This Look page${n > 1 ? "s" : ""} updated.`); } catch {}
+    return true;
   }
   const designOf = (bg) => (typeof bg === "string" && bg.startsWith("design:")) ? BG_DESIGNS[bg.slice(7)] : null;
   const designUri = (bg, W, H) => "data:image/svg+xml;charset=utf-8," + encodeURIComponent(designOf(bg).svg(W, H));
@@ -1590,10 +1627,51 @@ const ReelEngine = (() => {
       <button class="btn secondary small" data-a="front">Front</button><button class="btn secondary small" data-a="back">Back</button>${l.kind !== "person" ? '<button class="btn secondary small" data-a="dup">Duplicate</button>' : ""}${l.kind === "item" ? '<button class="btn secondary small" data-a="swap">Swap item</button>' : ""}`;
     const text = l.kind === "text" ? `<button class="btn secondary small" data-a="edit">Edit text</button><button class="btn secondary small" data-a="font">${l.font === "serif" ? "Sans" : "Serif"}</button>
       <label class="btn secondary small" style="margin:0">Color<input type="color" id="txtColor" value="${l.color}" style="width:22px;height:22px;border:0;background:none;padding:0"></label>` : "";
-    t.innerHTML = common + text + `<button class="btn danger small" data-a="remove">Remove</button>`;
+    t.innerHTML = common + text + `<button class="btn danger small" data-a="remove">${l.kind === "item" ? "Remove from collage" : "Remove"}</button>`;
     t.querySelectorAll("[data-a]").forEach((b) => b.onclick = () => action(b.dataset.a));
     const col = $("txtColor"); if (col) { col.oninput = (e) => { l.color = e.target.value; draw(); }; col.onchange = pushHistory; }
+    renderSelPanel(l);
   }
+  // Editing card for the selected clothing item: name, Amazon link, replace photo, remove. Sits under the toolbar so it
+  // never overlaps the stage or its drag / pinch / rotate handling.
+  function renderSelPanel(l) {
+    const p = $("selPanel"); const g = l && l.kind === "item" ? garment(l.g) : null;
+    if (!g) { p.innerHTML = ""; return; }
+    p.innerHTML = `<div class="card selp" style="margin:0">
+      <div class="thumb"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""></div>
+      <div class="f">
+        <input type="text" id="spName" value="${esc(g.name)}" placeholder="Product name" aria-label="Product name">
+        <input type="url" id="spUrl" value="${esc(g.affiliate_url || "")}" placeholder="Amazon product link" inputmode="url" autocapitalize="none" aria-label="Amazon link">
+        <div class="kv" id="spNote">${g.affiliate_url ? "Link attached." : '<span class="nolink">No Amazon link yet</span> — paste one above and tap Save.'}</div>
+        <div class="row" style="flex-wrap:wrap;gap:6px"><button class="btn small" id="spSave">Save details</button><button class="btn secondary small" id="spReplace">Replace photo</button><button class="btn secondary small" id="spSwap">Swap item</button><button class="btn danger small" id="spRemove">Remove from collage</button></div>
+      </div></div>`;
+    fillImgs(p);
+    $("spUrl").oninput = () => { $("spNote").textContent = tagAmazon($("spUrl").value, state.settings.amazon_tag).note || ($("spUrl").value.trim() ? "" : "No Amazon link yet"); };
+    $("spSave").onclick = () => saveGarmentDetails(g.id, { name: $("spName").value, url: $("spUrl").value }, $("spSave"));
+    $("spReplace").onclick = () => replacePhotoSheet(ed.sel);
+    $("spSwap").onclick = () => swapItemSheet(ed.sel);
+    $("spRemove").onclick = () => action("remove");
+  }
+  // Replace the picture of the selected item. Uploading a new photo updates THIS clothing item (same name, link and
+  // position); swapping picks a different saved item for the spot.
+  function replacePhotoSheet(i) {
+    const l = ed.layout.layers[i]; const g = l && l.kind === "item" ? garment(l.g) : null; if (!g) return;
+    openSheet(`<h3>Replace photo</h3><p class="hint">“${esc(g.name)}” keeps its name, Amazon link, position and size.</p><div class="stack">
+      <button class="btn" id="rpUpload">Upload a new photo of this item</button>
+      <p class="kv">The new photo replaces the old one for this item everywhere in the Studio (clothing list, other collages, try-on).</p>
+      <button class="btn secondary" id="rpSwapItem">Swap for a different saved item</button></div>`);
+    $("rpUpload").onclick = () => { state.replaceTarget = { layer: i, garment: g.id }; closeSheet(); $("replaceFile").click(); };
+    $("rpSwapItem").onclick = () => swapItemSheet(i);
+  }
+  $("replaceFile").addEventListener("change", (e) => {
+    const f = e.target.files[0]; e.target.value = ""; const t = state.replaceTarget; state.replaceTarget = null; const g = t && garment(t.garment);
+    if (!f || !g) return;
+    importWizard(f, { replaceGarmentId: g.id, name: g.name, url: g.product_url || g.affiliate_url || "", category: g.category, onSaved: async () => {
+      for (const k of Object.keys(ed.imgs)) if (k.includes(g.id)) delete ed.imgs[k];   // drop cached old pictures of this item
+      await preloadImgs(); draw(); renderLinks(); renderSelTools(); note("edMsg", "Photo replaced. Tap Save to keep the collage preview up to date.");
+      try { const n = await syncShopPagesForGarment(g.id); if (n) note("edMsg", "Photo replaced. Shop This Look page updated. Tap Save to refresh the collage preview."); } catch {}
+    } });
+  });
   function action(a) {
     const i = ed.sel; if (i == null) return; const l = ed.layout.layers[i]; const L = ed.layout.layers;
     const scale = (f) => { if (l.kind !== "text") l.w = Math.min(1.6, Math.max(0.08, l.w * f)); else l.size = Math.min(0.3, Math.max(0.02, l.size * f)); };
@@ -1652,6 +1730,10 @@ const ReelEngine = (() => {
       if (error) throw new Error(error.message);
       if (ed.c._draft) ed.c = { ...ed.c, ...row, _draft: false };
       ed.dirty = false; note("edMsg", "Saved.");
+      if (ed.c.outfit_id) {   // every saved outfit collage has its own Shop This Look page, kept in step with the collage
+        try { note("edMsg", "Saved. Updating the Shop This Look page…"); const sp = await publishShopFor({ ...ed.c, name }, ed.layout, {}); note("edMsg", "Saved. Shop This Look page is up to date: " + shopLink(sp)); renderLinks(); }
+        catch (e) { note("edMsg", "Saved, but the Shop This Look page could not be updated: " + e.message, true); }
+      }
     } catch (e) { note("edMsg", e.message, true); }
     $("edSave").disabled = false;
   };
@@ -1670,7 +1752,7 @@ const ReelEngine = (() => {
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   function captionCtx() { return { title: $("edName").value.trim() || "This outfit", items: collageItems(), s: state.settings, mode: ed.layout.mode }; }
   function genCaption(platform, tone, ctx) {
-    const { title, items, s } = ctx; const names = items.map((g) => g.name).filter(Boolean);
+    const { title, items, s } = ctx; const names = items.map((g) => (g.name || "").trim()).filter(Boolean);
     const list = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names.at(-1) : names[0] || "these pieces";
     const brands = [...new Set(items.map((g) => g.brand).filter(Boolean))];
     const me = ctx.mode === "me" ? " (yes, that's me in it)" : "";
@@ -1685,31 +1767,69 @@ const ReelEngine = (() => {
     const catTags = [...new Set(items.map((g) => g.category).filter(Boolean))].map((c) => "#" + c.replace(/[^a-z0-9]/gi, "")).join(" ");
     const handle = s.handle ? ` ${s.handle}` : "";
     const disclosure = (s.disclosure || DEFAULT_DISCLOSURE).trim();
-    const links = items.map((g) => `${g.name}: ${g.affiliate_url || "(link coming)"}`).join("\n");
-    if (platform === "facebook") return `${pick(hooks[tone])}\n\n${body}${notes ? " " + notes : ""}\n\nShop every piece:\n${links}\n\n${disclosure} #ad`;
-    if (platform === "instagram") return `${pick(hooks[tone])}\n\n${body}${notes ? " " + notes : ""}\n\nShop the look via the link in my bio${handle}.\n\n${disclosure} #ad #CommissionsEarned\n.\n.\n${tags} ${catTags}`.trim();
-    return `${pick(hooks[tone])} ${body}\nLinks in bio${handle} 🔗\n${disclosure} #ad\n${tags.split(/\s+/).slice(0, 5).join(" ")}`;
+    // Shopping: one Shop This Look link when the outfit has a page; individual Amazon links only on request (listLinks),
+    // and only for items that actually have one — never a blank ": (no link)" entry.
+    const shop = (ctx.shop_url || "").trim();
+    const links = linkedItems(items).map((g) => `${itemLabel(g)}: ${g.affiliate_url}`).join("\n");
+    const extra = shop ? (ctx.listLinks && links ? "\n\n" + links : "") : (links ? "\n" + links : "");
+    const shopLine = shop ? `Shop every piece: ${shop}` : (links ? "Shop every piece:" : "");
+    const tidy = (t) => t.replace(/\n{3,}/g, "\n\n").trim();
+    if (platform === "facebook") return tidy(`${pick(hooks[tone])}\n\n${body}${notes ? " " + notes : ""}\n\n${shopLine}${extra}\n\n${disclosure} #ad`);
+    if (platform === "instagram") return tidy(`${pick(hooks[tone])}\n\n${body}${notes ? " " + notes : ""}\n\n${shop ? `Shop the look: ${shop} (also in my bio${handle})` : `Shop the look via the link in my bio${handle}.`}${shop && ctx.listLinks && links ? "\n\n" + links : ""}\n\n${disclosure} #ad #CommissionsEarned\n.\n.\n${tags} ${catTags}`);
+    return tidy(`${pick(hooks[tone])} ${body}\n${shop ? "Shop: " + shop : "Links in bio" + handle + " 🔗"}\n${disclosure} #ad\n${tags.split(/\s+/).slice(0, 5).join(" ")}`);
   }
 
   // ================================================================== SHARE / PUBLISH
   const shopOf = (collageId) => state.shops.find((p) => p.collage_id === collageId);
+  // One stable Shop This Look page per OUTFIT: found by outfit_id, or (older pages) through the outfit's collage.
+  const shopOfOutfit = (outfitId) => outfitId ? (state.shops.find((p) => p.outfit_id === outfitId) || state.shops.find((p) => { const c = state.collages.find((x) => x.id === p.collage_id); return c && c.outfit_id === outfitId; }) || null) : null;
+  const shopFor = (c) => (c.outfit_id && shopOfOutfit(c.outfit_id)) || shopOf(c.id) || null;
   const shopLink = (sp) => SHOP_BASE + sp.slug;
   async function uploadPublic(path, blob) { const { error } = await sb.storage.from("shop").upload(path, blob, { contentType: blob.type, upsert: true }); if (error) throw new Error(error.message); }
-  async function publishShop(caption) {
-    const ctx = captionCtx(); let sp = shopOf(ed.c.id);
+  // Tappable areas on the published collage image: one rectangle per clothing item, in 0–1 collage coordinates.
+  async function layoutHotspots(layout) {
+    const R = ratio(layout.size || "portrait"), out = {};
+    for (const l of layout.layers || []) {
+      if (l.kind !== "item" || out[l.g]) continue; const p = layerSrc(l); if (!p) continue;
+      try { const img = await loadImg(await blobUrl(p)); const h = (l.w * img.height / img.width) / R; out[l.g] = { x: +(l.x - l.w / 2).toFixed(4), y: +(l.y - h / 2).toFixed(4), w: +l.w.toFixed(4), h: +h.toFixed(4) }; } catch {}
+    }
+    return out;
+  }
+  // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = collage image + item images in the
+  // public bucket + item list (name, link, hotspot). Unlinked items are included and shown as "Link coming soon".
+  async function publishShopFor(c, layout, opts = {}) {
+    const itemsIn = [...new Set((layout.layers || []).filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
+    const sp = shopFor(c);
     const slug = sp?.slug || Math.random().toString(36).slice(2, 12), base = `${state.uid}/${slug}`;
-    await uploadPublic(`${base}/collage.jpg`, await renderLayout(ed.layout, 1080));
+    await uploadPublic(`${base}/collage.jpg`, await renderLayout(layout, 1080));
+    const spots = await layoutHotspots(layout);
     const items = [];
-    for (const g of ctx.items) {
-      if (isApi(g)) { items.push({ name: g.name, brand: g.brand || "", url: g.affiliate_url || "", image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
+    for (const g of itemsIn) {
+      const common = { garment_id: g.id, name: itemLabel(g), brand: g.brand || "", url: g.affiliate_url || "", hotspot: spots[g.id] || null };
+      if (isApi(g)) { items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
       let image_path = null;
       const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
       if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
-      items.push({ name: g.name, brand: g.brand || "", url: g.affiliate_url || "", image_path });
+      items.push({ ...common, image_path });
     }
-    const row = { collage_id: ed.c.id, slug, title: ctx.title, caption: caption || null, disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString() };
-    const { error } = await (sp ? sb.from("shop_pages").update(row).eq("id", sp.id) : sb.from("shop_pages").insert(row)); if (error) throw new Error(error.message);
-    await loadAll(); return shopOf(ed.c.id);
+    const row = { collage_id: c.id, outfit_id: c.outfit_id || null, slug, title: opts.title || c.name || "This outfit", caption: opts.caption !== undefined ? (opts.caption || null) : (sp?.caption ?? null),
+      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString() };
+    const write = (r) => sp ? sb.from("shop_pages").update(r).eq("id", sp.id).eq("user_id", state.uid) : sb.from("shop_pages").insert(r);
+    let { error } = await write(row);
+    if (error && /outfit_id/.test(error.message)) { const { outfit_id, ...legacy } = row; ({ error } = await write(legacy)); }   // database not migrated yet: page still works, found through its collage
+    if (error) throw new Error(error.message);
+    await loadAll(); return shopFor(c);
+  }
+  async function publishShop(caption) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title }); }
+  // Keep published pages in sync after a product edit: every live page whose collage contains the item is re-published.
+  async function syncShopPagesForGarment(gid) {
+    const done = new Set(); let n = 0;
+    for (const c of state.collages) {
+      if (!(c.layout?.layers || []).some((l) => l.kind === "item" && l.g === gid)) continue;
+      const sp = shopFor(c); if (!sp?.published || done.has(sp.id)) continue; done.add(sp.id);
+      try { await publishShopFor(c, c.layout, {}); n++; } catch (e) { console.warn("shop sync failed", e); }
+    }
+    return n;
   }
   async function unpublishShop(sp) {
     const { data } = await sb.storage.from("shop").list(`${state.uid}/${sp.slug}`);
@@ -1720,10 +1840,10 @@ const ReelEngine = (() => {
   async function copyText(t, msgId) { try { await navigator.clipboard.writeText(t); note(msgId, "Copied."); } catch { note(msgId, "Copy failed — select the text and copy manually.", true); } }
   $("edShare").onclick = async () => { if (ed.c._draft || ed.dirty) { if (!confirm(ed.c._draft ? "Save the collage first? Sharing and publishing need a saved collage." : "Save the collage first?")) return; await $("edSave").onclick(); if (ed.c._draft || ed.dirty) return; } shareSheet(); };
   function shareSheet() {
-    const ctx = captionCtx(); let platform = "instagram", tone = "casual"; const sp = shopOf(ed.c.id);
-    const missing = ctx.items.filter((g) => !g.affiliate_url).length;
+    const sp = shopFor(ed.c); const ctx = { ...captionCtx(), shop_url: sp?.published ? shopLink(sp) : "" }; let platform = "instagram", tone = "casual";
+    const miss = missingInfo(ctx.items);
     openSheet(`<h3>Share / Publish</h3><div class="stack">
-      ${missing ? `<p class="kv" style="color:var(--danger)">${missing} item${missing > 1 ? "s have" : " has"} no Amazon link yet — add them in My Clothing for a complete shopping list.</p>` : ""}
+      ${miss.length ? `<p class="kv" style="color:var(--danger)">${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${esc(miss.map(itemLabel).join(", "))}): left out of captions and shown as “Link coming soon” on the shop page. Select the item on the collage to add the details.</p>` : ""}
       <div class="chips" id="capPlat"><button class="chip on" data-p="instagram">Instagram</button><button class="chip" data-p="facebook">Facebook</button><button class="chip" data-p="tiktok">TikTok</button></div>
       <div class="chips" id="capTone"><button class="chip on" data-t="casual">Casual</button><button class="chip" data-t="polished">Polished</button><button class="chip" data-t="playful">Playful</button><button class="chip" id="capRegen">↻ New wording</button></div>
       <textarea id="capText" style="min-height:150px"></textarea>
@@ -1758,7 +1878,7 @@ const ReelEngine = (() => {
       try {
         const id = crypto.randomUUID(), path = `${state.uid}/fb/${id}.jpg`;
         await upload(path, await renderLayout(ed.layout, 1620));
-        const caption = $("capText").value.trim() + (link ? "\n\nShop every piece: " + link : "");
+        const cap = $("capText").value.trim(), caption = cap + (link && !cap.includes(link) ? "\n\nShop every piece: " + link : "");   // shop link always in Page posts, never twice
         const { error } = await sb.from("fb_posts").insert({ id, collage_id: ed.c.id, caption, image_path: path, status: "draft" });
         if (error) throw new Error(error.message);
         await loadAll(); fbPostSheet(id);
@@ -1777,7 +1897,7 @@ const ReelEngine = (() => {
     $("shImage").onclick = async () => { const blob = await renderLayout(ed.layout, 2160); await saveToPhotos(blob, `${ctx.title.replace(/\W+/g, "-")}.jpg`); };
     $("shAmazon").onclick = async () => {
       note("shMsg", "Preparing…");
-      const pack = [ctx.title, "", ...ctx.items.map((g) => `${g.name}${g.brand ? " — " + g.brand : ""}${g.asin ? " · ASIN " + g.asin : ""}\n${g.affiliate_url || "(no link)"}`), "", $("capText").value].join("\n");
+      const pack = [ctx.title, "", ...linkedItems(ctx.items).map((g) => `${itemLabel(g)}${g.brand && (g.name || "").trim() ? " — " + g.brand : ""}${g.asin ? " · ASIN " + g.asin : ""}\n${g.affiliate_url}`), "", $("capText").value].join("\n");
       await copyText(pack, "shMsg");
       const portrait = await renderLayout({ ...ed.layout, size: "portrait" }, 2160), square = await renderLayout({ ...ed.layout, size: "square" }, 2160);
       const files = [new File([portrait], "outfit-4x5.jpg", { type: "image/jpeg" }), new File([square], "outfit-square.jpg", { type: "image/jpeg" })];
@@ -1947,14 +2067,16 @@ const ReelEngine = (() => {
     let hero = null; if (rl.template === "mirror" && rl.hero) { const [k, id] = rl.hero.split(":"); const p = person(k, id); if (p) hero = await loadImg(await blobUrl(p.path)).catch(() => null); }
     const bg = designOf(rl.theme) ? await loadImg(designUri(rl.theme, ReelEngine.W, ReelEngine.H)) : null;
     try { await document.fonts.load('600 40px Fraunces'); await document.fonts.load('600 40px "Inter Tight"'); } catch {}
-    const c = state.collages.find((x) => x.outfit_id === o.id); const sp = c ? shopOf(c.id) : null;
+    const c = state.collages.find((x) => x.outfit_id === o.id); const sp = shopOfOutfit(o.id);   // reels reuse the outfit's one Shop This Look page
     const keep = items.filter((g, i) => imgs[i]);
+    const miss = missingInfo(keep); rl.missingNote = miss.length ? `${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${miss.map(itemLabel).join(", ")}) will be left out of the caption and shown as unavailable on the shop page. Add the details in My Clothing or the collage editor.` : "";
     rl.assets = { items: imgs.filter(Boolean), hero, bg };
     rl.spec = { template: rl.template, duration: rl.duration, title: o.name, subtitle: (o.caption || "").split("\n")[0].slice(0, 60), caption: $("rlCaption").value.trim(), bgColor: designOf(rl.theme) ? null : rl.theme,
       items: keep.map((g) => ({ name: g.name, price: reelPrice(g) })), cta: sp?.published ? "Shop page in bio" : "Links in bio", disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE), handle: state.settings.handle || "",
-      links: keep.map((g) => ({ name: g.name, brand: g.brand || "", url: g.affiliate_url || "", asin: g.asin || null })), shop_url: sp?.published ? shopLink(sp) : null, outfit_id: o.id, collage_id: c?.id || null };
-    note("rlMsg", "");
+      links: keep.map((g) => ({ garment_id: g.id, name: itemLabel(g), brand: g.brand || "", url: g.affiliate_url || "", asin: g.asin || null })), shop_url: sp?.published ? shopLink(sp) : null, outfit_id: o.id, collage_id: c?.id || null };
+    note("rlMsg", rl.missingNote || "");
   }
+  const reelCaption = (o, listLinks) => { const sp = shopOfOutfit(o.id); return genCaption("instagram", "casual", { title: o.name, items: reelItems(o), s: state.settings, mode: "clothing", shop_url: sp?.published ? shopLink(sp) : "", listLinks: !!listLinks }); };
   $("rlPreviewBtn").onclick = async () => {
     try { stopReelPreview(); await buildReelSpec(); $("rlPreviewWrap").classList.remove("hidden"); rl.stop = ReelEngine.preview($("rlPreview"), rl.spec, rl.assets, (t) => note("rlMsg", `Preview ${t.toFixed(1)}s / ${rl.spec.duration}s`)); $("rlPreviewWrap").scrollIntoView({ behavior: "smooth", block: "center" }); }
     catch (e) { note("rlMsg", e.message, true); }
@@ -1980,7 +2102,7 @@ const ReelEngine = (() => {
     try {
       const id = crypto.randomUUID(), base = `${state.uid}/reels/${id}`;
       await upload(`${base}.${rl.result.ext}`, rl.result.blob); await upload(`${base}.jpg`, await ReelEngine.poster(rl.spec, rl.assets));
-      const o = state.outfits.find((x) => x.id === rl.spec.outfit_id); const caption = genCaption("instagram", "casual", { title: o.name, items: reelItems(o), s: state.settings, mode: "clothing" });
+      const o = state.outfits.find((x) => x.id === rl.spec.outfit_id); const caption = reelCaption(o, false);   // shop link + disclosure, no long URL list
       const { error } = await sb.from("reels").insert({ id, outfit_id: rl.spec.outfit_id, collage_id: rl.spec.collage_id, name: o.name, template: rl.spec.template, theme: rl.theme, duration_s: rl.spec.duration, caption, links: rl.spec.links, path: `${base}.${rl.result.ext}`, poster_path: `${base}.jpg`, mime: rl.result.mime, size_bytes: rl.result.blob.size, width: ReelEngine.W, height: ReelEngine.H });
       if (error) throw new Error(error.message);
       await loadAll(); renderReelsTab(); note("rlMsg", "Saved. Find it under Saved reels — open it for caption, links and sharing.");
@@ -1989,20 +2111,31 @@ const ReelEngine = (() => {
   };
   function reelSheet(id) {
     const r = (state.reels || []).find((x) => x.id === id); if (!r) return;
+    const o = state.outfits.find((x) => x.id === r.outfit_id); const sp = o ? shopOfOutfit(o.id) : null; const link = sp?.published ? shopLink(sp) : "";
+    const cur = o ? reelItems(o) : [], snap = r.links || [];
+    // The video's Shop the Look ending was rendered from a snapshot; if names/links changed since, say so instead of pretending.
+    const stale = !!o && (snap.some((l) => !cur.find((g) => itemLabel(g) === (l.name || "") && (g.affiliate_url || "") === (l.url || ""))) || cur.length !== snap.length);
+    const miss = missingInfo(cur);
     openSheet(`<h3>${esc(r.name)} · ${r.duration_s}s · ${esc(ReelEngine.TEMPLATES[r.template] || r.template)}</h3>
       <video id="rsVideo" controls playsinline style="width:100%;border-radius:14px;background:#000"></video>
       <p class="kv">${(r.size_bytes / 1048576).toFixed(1)} MB · ${esc(r.mime || "")} · ${esc(fmtWhen(r.created_at))}</p>
-      <div class="stack"><div><label>Caption (links + disclosure)</label><textarea id="rsCap" style="min-height:140px">${esc(r.caption)}</textarea></div>
-        <div class="row"><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsLinks">Copy links</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
-        <button class="btn" id="rsShare">Save to Photos / share</button>
-        <p class="kv">To post: Save to Photos → open Instagram or Facebook → New Reel → pick the video → add music from their library → paste the caption. The affiliate links and disclosure are in the caption; the Shop the Look ending is already in the video.</p>
+      ${stale ? '<p class="kv" style="color:var(--danger)">Product names or links changed since this video was rendered. The Shop the Look ending inside the video still shows the old text — render the reel again to update it. The caption below can use the latest saved details (Refresh caption).</p>' : ""}
+      ${miss.length ? `<p class="kv" style="color:var(--danger)">${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${esc(miss.map(itemLabel).join(", "))}) ${miss.length > 1 ? "are" : "is"} left out of the caption. Add the details in My Clothing or the collage editor.</p>` : ""}
+      <p class="kv" style="margin:8px 0">${link ? `Shop This Look page: <a href="${esc(link)}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(link)}</a>` : "No Shop This Look page yet — save a collage for this outfit and one is created automatically."}</p>
+      <div class="stack"><label class="inline"><input type="checkbox" id="rsList"> Include individual Amazon links in the caption</label>
+        <div><label>Caption (shop link + disclosure)</label><textarea id="rsCap" style="min-height:140px">${esc(r.caption)}</textarea></div>
+        <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsCopyShop" ${link ? "" : "disabled"}>Copy shop link</button><button class="btn secondary small" id="rsRefresh">Refresh caption</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
+        <button class="btn" id="rsShare">Share video (Save to Photos)</button>
+        <p class="kv">To post: Save to Photos → open Instagram or Facebook → New Reel → pick the video → add music from their library → paste the caption. Instagram doesn't make caption links tappable, so keep the shop link in your bio too. Facebook Page posts made from the Studio include the shop link automatically; for your personal profile, share the video and paste the caption.</p>
         <button class="btn danger" id="rsDel">Delete reel</button><div id="rsMsg" class="msg"></div></div>`);
     url(r.path).then((u) => { $("rsVideo").src = u; });
+    const regen = () => { if (!o) return; $("rsCap").value = reelCaption(o, $("rsList").checked); note("rsMsg", "Caption refreshed from the latest saved product details — tap Save caption to keep it."); };
+    $("rsList").onchange = regen; $("rsRefresh").onclick = regen;
     $("rsCopy").onclick = () => copyText($("rsCap").value, "rsMsg");
-    $("rsLinks").onclick = () => copyText((r.links || []).map((l) => `${l.name}: ${l.url || "(no link)"}`).join("\n"), "rsMsg");
-    $("rsSaveCap").onclick = async () => { const { error } = await sb.from("reels").update({ caption: $("rsCap").value }).eq("id", r.id); note("rsMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
+    $("rsCopyShop").onclick = () => copyText(link, "rsMsg");
+    $("rsSaveCap").onclick = async () => { const { error } = await sb.from("reels").update({ caption: $("rsCap").value }).eq("id", r.id).eq("user_id", state.uid); note("rsMsg", error ? error.message : "Caption saved.", !!error); if (!error) loadAll(); };
     $("rsShare").onclick = async () => { try { note("rsMsg", "Preparing…"); const blob = await blobOf(r.path); const file = new File([blob], `closetiq-reel.${r.path.endsWith(".webm") ? "webm" : "mp4"}`, { type: r.mime || "video/mp4" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: r.caption }); note("rsMsg", ""); } else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); note("rsMsg", "Downloaded."); } } catch (e) { if (e.name !== "AbortError") note("rsMsg", e.message, true); } };
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: $("rsCap").value }); note("rsMsg", ""); } else { const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); note("rsMsg", "Downloaded."); } } catch (e) { if (e.name !== "AbortError") note("rsMsg", e.message, true); } };
     $("rsDel").onclick = async () => { if (!confirm("Delete this reel?")) return; await removeFiles([r.path, r.poster_path]); await sb.from("reels").delete().eq("id", r.id); closeSheet(); await loadAll(); renderReelsTab(); };
   }
 

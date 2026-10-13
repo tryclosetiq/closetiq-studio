@@ -20,6 +20,9 @@
   h1{font:600 30px/1.1 Fraunces,serif;margin:0 0 6px;text-wrap:balance}
   .cap{color:var(--muted);white-space:pre-wrap;margin:0 0 16px;font-size:15px}
   .hero{width:100%;border-radius:16px;display:block;background:var(--soft);margin-bottom:18px}
+  .herowrap{position:relative;margin-bottom:18px} .herowrap .hero{margin:0}
+  .herowrap .hot{position:absolute;display:block;border-radius:8px;-webkit-tap-highlight-color:rgba(0,0,0,.08)} .herowrap .hot:focus-visible{outline:2px solid var(--accent)}
+  .item .img a{display:block;width:100%;height:100%}
   .disc{font-size:13px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 16px}
   .item{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:10px}
   .item .img{flex:0 0 84px;width:84px;height:104px;border-radius:10px;background:var(--soft);display:grid;place-items:center;overflow:hidden;color:var(--muted);font-size:11px}
@@ -51,12 +54,14 @@
   document.title = p.title + " · Shop This Outfit";
   const ok = (u) => /^https:\/\/([a-z0-9-]+\.)*(amazon\.[a-z.]+|amzn\.(to|com|eu|asia|in)|a\.co)\//i.test(u || "");
   page.innerHTML = `<p class="brand">Shop this outfit</p><h1>${esc(p.title)}</h1>${p.caption ? `<p class="cap">${esc(p.caption)}</p>` : ""}
-    ${p.collage_public_path ? `<img class="hero" src="${pub(p.collage_public_path)}" alt="${esc(p.title)}">` : ""}
+    ${p.collage_public_path ? `<div class="herowrap"><img class="hero" src="${pub(p.collage_public_path)}" alt="${esc(p.title)}">${(p.items || []).filter((it) => it.hotspot && ok(it.url)).map((it) => `<a class="hot" href="${esc(it.url)}" target="_blank" rel="noopener sponsored" aria-label="Shop ${esc(it.name)} on Amazon" style="left:${(it.hotspot.x * 100).toFixed(2)}%;top:${(it.hotspot.y * 100).toFixed(2)}%;width:${(it.hotspot.w * 100).toFixed(2)}%;height:${(it.hotspot.h * 100).toFixed(2)}%"></a>`).join("")}</div>` : ""}
     <p class="disc">${esc(p.disclosure)}</p>
-    ${(p.items || []).map((it) => `<div class="item">
-      <div class="img">${it.image_path ? `<img src="${pub(it.image_path)}" alt="${esc(it.name)}" loading="lazy">` : "No photo"}</div>
-      <div class="t"><p class="n">${esc(it.name)}</p>${it.brand ? `<p class="b">${esc(it.brand)}</p>` : ""}
-        <a class="btn" href="${ok(it.url) ? esc(it.url) : "#"}" ${ok(it.url) ? 'target="_blank" rel="noopener sponsored"' : 'aria-disabled="true"'}>${ok(it.url) ? "Shop on Amazon" : "Link coming soon"}</a></div></div>`).join("")}
+    ${(p.items || []).map((it) => { const fresh = it.price && it.price_at && Date.now() - new Date(it.price_at).getTime() < 24 * 3600e3;
+      const img = it.image_path ? `<img src="${pub(it.image_path)}" alt="${esc(it.name)}" loading="lazy">` : it.image_url ? `<img src="${esc(it.image_url)}" alt="${esc(it.name)}" loading="lazy">` : "No photo";
+      return `<div class="item">
+      <div class="img">${ok(it.url) ? `<a href="${esc(it.url)}" target="_blank" rel="noopener sponsored" aria-label="Shop ${esc(it.name)} on Amazon">${img}</a>` : img}</div>
+      <div class="t"><p class="n">${esc(it.name)}</p>${it.brand ? `<p class="b">${esc(it.brand)}</p>` : ""}${fresh ? `<p class="b">${esc(it.price)} <span style="font-size:11px">as of ${esc(new Date(it.price_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</span></p>` : ""}
+        <a class="btn" href="${ok(it.url) ? esc(it.url) : "#"}" ${ok(it.url) ? 'target="_blank" rel="noopener sponsored"' : 'aria-disabled="true"'}>${ok(it.url) ? "Shop on Amazon" : "Link coming soon"}</a></div></div>`; }).join("")}
     <p class="foot">Prices and availability are shown on Amazon. Updated ${esc(new Date(p.updated_at).toLocaleDateString())}.</p>`;
 })();
 </script>
