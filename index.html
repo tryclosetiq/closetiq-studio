@@ -150,6 +150,10 @@
   <section id="tab-models">
     <h2>My Models</h2>
     <p class="hint">Your photos, AI versions of you, and reusable AI models. Tap one for options.</p>
+    <div class="card" style="margin-bottom:12px"><strong>My Reference Photos</strong><p class="kv" id="refHint" style="margin:4px 0 8px"></p>
+      <div class="strip" id="refStrip"></div>
+      <button class="btn secondary small" id="refStyle" style="margin-top:6px">Style me in an outfit (pose, hair, scene)</button>
+      <input id="refFile" type="file" accept="image/*" multiple class="hidden"></div>
     <div class="chips" id="modelFilter" style="margin-bottom:10px"><button class="chip on" data-f="all">All</button><button class="chip" data-f="photo">My photos</button><button class="chip" data-f="ai_self">AI me</button><button class="chip" data-f="ai_model">AI models</button><button class="chip" data-f="default">Presets</button></div>
     <div class="grid" id="modelGrid"></div>
     <input id="selfieFile" type="file" accept="image/*" multiple class="hidden">
@@ -814,7 +818,7 @@ const ReelEngine = (() => {
     $("addSelfie").onclick = () => $("selfieFile").click();
     $("genModel").onclick = () => modelGenSheet();
     g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => personSheet(t.dataset.kind, t.dataset.id));
-    fillImgs(g);
+    fillImgs(g); renderRefs();
   }
   $("selfieFile").addEventListener("change", async (e) => {
     for (const f of e.target.files) await addSelfieFromBlob(f, "");
@@ -826,6 +830,7 @@ const ReelEngine = (() => {
     await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
     const { error } = await sb.from("selfies").insert({ id, path: base + ".jpg", thumb_path: base + "_t.jpg", label });
     if (error) throw new Error(error.message);
+    return id;
   }
   function personSheet(kind, id) {
     const p = person(kind, id); if (!p) return;
@@ -836,12 +841,16 @@ const ReelEngine = (() => {
       ${shared ? '<p class="kv" style="margin:8px 0">Preset model from the shared library.</p>' : ""}${p.prompt && (!shared || owner) ? `<p class="kv" style="margin:8px 0">${esc(p.prompt)}</p>` : ""}
       <div class="stack" style="margin-top:12px">
         ${kind !== "generation" && owner ? `<div><label>Name</label><input type="text" id="pName" value="${esc(p.label)}"></div>` : ""}
+        ${kind === "model" && p.style ? `<p class="kv" style="margin:0">Base picture for Style Me${styleSummary(p.style) ? ": " + esc(styleSummary(p.style)) : ""}.</p>` : ""}
+        ${kind === "selfie" && owner ? `<button class="btn secondary" id="pRef">${p.is_reference ? "Remove from reference photos" : "Use as reference photo (identity)"}</button>${p.is_reference && refPhotos()[0]?.id !== id ? '<button class="btn secondary" id="pRefPrimary">Make primary reference</button>' : ""}` : ""}
         <button class="btn" id="pUse">Use in Try-On</button>
         ${owner ? `<button class="btn secondary" id="pCut">${p.cutout_path ? "Redo person cutout" : "Person cutout (remove background)"} · ${cost("bgremove")} credit</button>` : ""}
         <button class="btn secondary" id="pSave">Save to Photos</button>
         ${kind === "generation" ? '<button class="btn secondary" id="pAsModel">Save as model</button>' : ""}
         ${owner ? '<button class="btn danger" id="pDel">Delete</button>' : ""}<div id="pMsg" class="msg"></div></div>`);
     $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("pImg").src = await url(p[c.dataset.v]); });
+    if ($("pRef")) $("pRef").onclick = async () => { try { await setReference(id, !p.is_reference); personSheet(kind, id); } catch (e) { note("pMsg", e.message, true); } };
+    if ($("pRefPrimary")) $("pRefPrimary").onclick = async () => { await makePrimaryReference(id); personSheet(kind, id); };
     $("pUse").onclick = () => { state.sel.selfie = kind === "model" ? null : (kind === "selfie" ? id : null); state.sel.model = kind === "model" ? id : (kind === "generation" ? "gen:" + id : null); closeSheet(); renderPickers(); showTab("tryon"); };
     if ($("pCut")) $("pCut").onclick = async () => {
       if (!confirmSpend(cost("bgremove"), "Remove the background around the person (transparent PNG for collages).")) return;
@@ -1169,7 +1178,7 @@ const ReelEngine = (() => {
   // ================================================================== PHOTOS
   function renderPhotos() {
     const g = $("genGrid");
-    g.innerHTML = state.generations.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.path)}" loading="lazy" alt="">${x.parent_id ? '<span class="badge">replaced</span>' : x.cutout_path ? '<span class="badge">cutout</span>' : ""}</button>`).join("") || '<div class="empty">Nothing generated yet.</div>';
+    g.innerHTML = state.generations.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.path)}" loading="lazy" alt="">${fidelityLabel(x.style) ? `<span class="badge">${fidelityLabel(x.style)}</span>` : x.parent_id ? '<span class="badge">replaced</span>' : x.cutout_path ? '<span class="badge">cutout</span>' : ""}</button>`).join("") || '<div class="empty">Nothing generated yet.</div>';
     g.querySelectorAll(".tile").forEach((t) => t.onclick = () => photoSheet(t.dataset.id));
     fillImgs(g);
   }
@@ -1183,6 +1192,7 @@ const ReelEngine = (() => {
     openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Photo</button>${parent ? `<button class="chip" data-p="${esc(parent.path)}">Original (before replace)</button>` : ""}${x.cutout_path ? '<button class="chip" data-v="cutout_path">Cutout</button>' : ""}</div>
       <img class="big" id="phImg" data-path="${esc(x.path)}" alt="">
       <p class="kv" style="margin:8px 0">${esc(new Date(x.created_at).toLocaleString())} · ${esc(x.preset || x.kind)} · ${x.credits} credit(s)${x.kind === "replace" ? " · replaced item" : ""}${g ? " · " + esc(g.name) : ""}${o ? " · " + esc(o.name) : ""}</p>
+      ${fidelityLabel(x.style) ? `<p class="kv" style="margin:0 0 8px"><strong>${fidelityLabel(x.style)}</strong>${styleSummary(x.style) ? " · " + esc(styleSummary(x.style)) : ""} — ${x.style.fidelity === "inspiration" ? "AI styling preview of you; the linked products are the exact items." : "AI try-on of the real product photos; check colours and fit before calling it exact."}</p>` : ""}
       ${versions.length ? `<div style="margin-bottom:10px"><label>Versions (original first)</label><div class="strip" id="pVers">${versions.map((v) => `<button class="tile ${v.id === x.id ? "sel" : ""}" data-id="${v.id}"><img data-path="${esc(v.path)}" alt=""><span class="cap">${v.parent_id ? esc(garment(v.garment_id)?.name || "replaced") : "original"}</span></button>`).join("")}</div></div>` : ""}
       <div class="stack"><button class="btn" id="pSave">Save to Photos</button>
         <button class="btn secondary" id="pReplace">Replace one item · from ${fromCredits} credit</button>
@@ -1301,6 +1311,7 @@ const ReelEngine = (() => {
         <button class="btn" id="oCopy">Copy caption + links</button>
         <button class="btn secondary" id="oCollage">Collage builder</button>
         <button class="btn secondary" id="oTry">Try on this outfit</button>
+        <button class="btn secondary" id="oStyle">Style me in this outfit (pose, hair, scene)</button>
         <button class="btn secondary" id="oEdit">Edit items</button>
         <button class="btn danger" id="oDel">Delete outfit</button><div id="oMsg" class="msg"></div></div>`);
     $("oCopy").onclick = () => copyText(linksText(o.name, o.caption, items), "oMsg");
@@ -1316,6 +1327,7 @@ const ReelEngine = (() => {
       openEditor({ id: crypto.randomUUID(), name: o.name, outfit_id: o.id, layout, preview_path: null, _draft: true });   // saved to the database on first Save only
     };
     $("oTry").onclick = () => { const own = items.filter((g) => !isApi(g)); if (!own.length) { note("oMsg", "This outfit only has Amazon-API products, which can't be used for try-on.", true); return; } outfitTrySheet(o, own); };
+    $("oStyle").onclick = () => { const own = items.filter((g) => !isApi(g)); if (!own.length) { note("oMsg", "This outfit only has Amazon-API products, which can't be used for try-on.", true); return; } if (!state.selfies.length) { note("oMsg", "Add a photo of yourself under My Models first.", true); return; } styleMeSheet(o, own); };
     $("oEdit").onclick = () => outfitEditor(o);
     $("oDel").onclick = async () => { if (!confirm(`Delete "${o.name}"? (Clothing, collages and photos stay.)`)) return; await sb.from("outfits").delete().eq("id", o.id); closeSheet(); await loadAll(); };
   }
@@ -1363,6 +1375,134 @@ const ReelEngine = (() => {
       $("otGo").disabled = false;
     };
     fillImgs($("sheetBody"));
+  }
+
+  // ================================================================== STYLE ME (personal styling preview)
+  // The collage stays the exact shoppable reference. "Style Me" makes a NEW picture of the owner: FASHN Model Create with
+  // her reference photo as face_reference (identity) and a prompt that is explicitly allowed to change pose, hair and scene,
+  // then the outfit's product photos are tried on that base one item at a time (Try-On Max keeps the real fit).
+  // FASHN takes ONE face image per generation; Studio keeps up to 5 reference photos so the best one can be picked per look.
+  const REF_MAX = 5;
+  const POSES = [["keep", "As in my photo", ""], ["straight", "Straight-on", "standing straight and facing the camera, relaxed shoulders, arms naturally at her sides"],
+    ["threeq", "Slight 3/4 turn", "standing in a slight three-quarter turn toward the camera, weight on one leg"], ["walking", "Walking", "mid-stride, walking toward the camera with natural movement"],
+    ["hip", "Hand on hip", "standing with one hand resting on her hip, confident and easy"], ["relaxed", "Relaxed casual", "relaxed casual stance with a slight lean and a soft natural smile"],
+    ["mirror", "Mirror selfie", "taking a mirror selfie in a full-length mirror, phone held up beside her face so it never covers the clothes, whole outfit visible"]];
+  const HAIRS = [["keep", "As in my photo", ""], ["straight", "Down, straight", "hair worn down and straight"], ["waves", "Loose waves", "hair worn down in loose soft waves"], ["curls", "Curls", "hair worn down in defined curls"],
+    ["ponytail", "Ponytail", "hair pulled back in a sleek ponytail"], ["bun", "Bun", "hair up in a neat bun"], ["halfup", "Half-up", "hair half-up, half-down"]];
+  const SCENES = [["keep", "As in my photo", ""], ["studio", "Plain studio", "plain neutral studio backdrop with soft even lighting"], ["bedroom", "Bedroom / closet mirror", "a tidy bedroom or closet with a full-length mirror and soft daylight"],
+    ["indoor", "Indoor lifestyle", "a bright indoor lifestyle setting such as a living room or café with natural window light"], ["outdoor", "Outdoor casual", "a casual outdoor street or park setting in daylight"], ["night", "Dressy / night out", "a dressy night-out setting with warm city lights in the evening"]];
+  const optOf = (list, k) => list.find((x) => x[0] === k) || list[0];
+  const IDENTITY_PROMPT = "Photorealistic full-body photo of the exact same woman as the face reference. Keep her real facial features, skin tone, age, hair colour and natural body proportions; realistic body shape with no slimming, retouching or glamour makeover — she must be recognisably her, identity first, style second.";
+  function identityPrompt(st) {
+    const pose = optOf(POSES, st.pose)[2], hair = optOf(HAIRS, st.hair)[2], scene = optOf(SCENES, st.background)[2];
+    return [IDENTITY_PROMPT, pose ? `Pose: ${pose}.` : "Pose: natural and relaxed, similar to her photo.", hair ? `Hair: ${hair}.` : "Hair: her natural hairstyle as in the reference photo.",
+      scene ? `Scene: ${scene}.` : "Scene: similar to her photo, clean and uncluttered.",
+      "She wears a plain fitted neutral top and simple neutral pants (the outfit is added afterwards). Full body including shoes, natural daylight-style realism, sharp focus, no text, no watermark."].join(" ");
+  }
+  const styleKey = (st) => [st.ref_selfie_id, st.pose, st.hair, st.background, st.face_mode].join("|");
+  const styleSummary = (st) => st ? [optOf(POSES, st.pose)[1], optOf(HAIRS, st.hair)[1], optOf(SCENES, st.background)[1]].filter((x) => x && x !== "As in my photo").join(" · ") : "";
+  const fidelityLabel = (st) => st?.fidelity === "inspiration" ? "Get the look" : st?.fidelity === "exact" ? "Product preview" : "";
+  const refPhotos = () => state.selfies.filter((s) => s.is_reference).sort((a, b) => (a.ref_rank ?? 99) - (b.ref_rank ?? 99) || (a.created_at < b.created_at ? 1 : -1));
+  const refsSupported = () => state.selfies.length === 0 || "is_reference" in state.selfies[0];   // column exists once the Style Me migration is live
+  async function setReference(id, on) {
+    const refs = refPhotos();
+    if (on && refs.length >= REF_MAX && !refs.some((s) => s.id === id)) throw new Error(`Up to ${REF_MAX} reference photos — remove one first.`);
+    const { error } = await sb.from("selfies").update({ is_reference: on, ref_rank: on ? (refs.length ? Math.max(...refs.map((s) => s.ref_rank ?? 0)) + 1 : 1) : null }).eq("id", id).eq("user_id", state.uid);
+    if (error) throw new Error(/is_reference/.test(error.message) ? "Reference photos need the Style Me database update first." : error.message);
+    await loadAll();
+  }
+  async function makePrimaryReference(id) {
+    const order = [id, ...refPhotos().map((s) => s.id).filter((x) => x !== id)];
+    for (let i = 0; i < order.length; i++) await sb.from("selfies").update({ ref_rank: i + 1 }).eq("id", order[i]).eq("user_id", state.uid);
+    await loadAll();
+  }
+  function renderRefs() {
+    const el = $("refStrip"); if (!el) return; const refs = refPhotos();
+    el.innerHTML = refs.map((s, i) => `<button class="tile" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt="">${i === 0 ? '<span class="badge">primary</span>' : ""}<span class="cap">${esc(s.label || "Reference " + (i + 1))}</span></button>`).join("")
+      + (refs.length < REF_MAX ? `<button class="tile add" id="refAdd">+ Add</button>` : "");
+    $("refHint").textContent = refs.length ? `${refs.length} of ${REF_MAX}. The primary photo is used by default; you can pick another for any look.` : "Add 1–5 clear photos of yourself (face visible, good light). They are used to keep every styled picture recognisably you.";
+    $("refStyle").disabled = !refs.length;
+    el.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => personSheet("selfie", t.dataset.id));
+    if ($("refAdd")) $("refAdd").onclick = () => $("refFile").click();
+    fillImgs(el);
+  }
+  $("refFile").addEventListener("change", async (e) => {
+    try { for (const f of [...e.target.files].slice(0, REF_MAX - refPhotos().length)) { const id = await addSelfieFromBlob(f, "Reference"); await setReference(id, true); } }
+    catch (err) { alert(err.message); }
+    e.target.value = "";
+  });
+  $("refStyle").onclick = () => {
+    const outfits = state.outfits.filter((o) => o.items.map(garment).filter((g) => g && !isApi(g)).length);
+    if (!outfits.length) { alert("Create an outfit with your own clothing photos first (Outfits tab)."); return; }
+    openSheet(`<h3>Style me in…</h3><div class="stack">${outfits.map((o) => `<button class="btn secondary" data-o="${o.id}">${esc(o.name)}</button>`).join("")}</div>`);
+    $("sheetBody").querySelectorAll("[data-o]").forEach((b) => b.onclick = () => { const o = state.outfits.find((x) => x.id === b.dataset.o); styleMeSheet(o, o.items.map(garment).filter((g) => g && !isApi(g))); });
+  };
+  function styleMeSheet(o, items) {
+    const p = state.me.presets; const pc = (k) => p[k].credits;
+    const refs = refPhotos(), others = state.selfies.filter((s) => !s.is_reference);
+    const st = { ref_selfie_id: refs[0]?.id || others[0]?.id || null, pose: "keep", hair: "keep", background: "keep", face_mode: "match_base", fidelity: "inspiration" };
+    let baseMode = "fast", reuse = null;
+    const chips = (id, list, key) => `<div class="chips" id="${id}">${list.map(([k, l]) => `<button class="chip ${st[key] === k ? "on" : ""}" data-k="${k}">${l}</button>`).join("")}</div>`;
+    openSheet(`<h3>Style me: ${esc(o.name)}</h3>
+      <p class="hint">A new picture of you in this outfit. Your face comes from a reference photo; pose, hair and scene can change. The collage stays the exact shoppable reference.</p>
+      <div class="stack">
+        <div><label>Reference photo (identity)</label><div class="strip" id="smRef">${[...refs, ...others].map((s) => `<button class="tile ${s.id === st.ref_selfie_id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt="">${s.is_reference ? '<span class="badge">ref</span>' : ""}</button>`).join("") || '<div class="empty">Add a photo of yourself under My Models first.</div>'}</div></div>
+        <div><label>Pose</label>${chips("smPose", POSES, "pose")}</div>
+        <div><label>Hairstyle</label>${chips("smHair", HAIRS, "hair")}</div>
+        <div><label>Background</label>${chips("smScene", SCENES, "background")}</div>
+        <div><label>Likeness</label><div class="chips" id="smFace"><button class="chip on" data-k="match_base">Natural · pose can change</button><button class="chip" data-k="match_reference">Closest likeness · keeps my head pose</button></div></div>
+        <div><label>Base image</label><div class="chips" id="smBase"><button class="chip on" data-m="fast">Fast · ${cost("model_fast") + cost("face_reference")} credits</button><button class="chip" data-m="balanced">Balanced · ${cost("model_balanced") + cost("face_reference")} credits</button><button class="chip hidden" data-m="reuse" id="smReuse">Reuse last base · 0 credits</button></div></div>
+        <div><label>Outfit quality (per item)</label><select id="smPreset">${Object.entries(p).filter(([k]) => k.startsWith("max")).map(([k, v]) => `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(v.label)} · ${v.credits}/item</option>`).join("")}</select></div>
+        <div><label>How to label the result</label><div class="chips" id="smFid"><button class="chip on" data-k="inspiration">Get the Look · styling inspiration</button><button class="chip" data-k="exact">Exact Product Preview</button></div>
+          <p class="kv" id="smFidNote"></p></div>
+        <p class="hint" id="smCost"></p>
+        <button class="btn" id="smGo">Generate</button><div id="smMsg" class="msg"></div>
+        <div class="steps" id="smSteps"></div><div id="smAfter"></div></div>`);
+    const pick = (id, key) => $(id).querySelectorAll(".chip").forEach((c) => c.onclick = () => { st[key] = c.dataset.k; $(id).querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
+    pick("smPose", "pose"); pick("smHair", "hair"); pick("smScene", "background"); pick("smFace", "face_mode"); pick("smFid", "fidelity");
+    $("smRef").querySelectorAll(".tile").forEach((t) => t.onclick = () => { st.ref_selfie_id = t.dataset.id; $("smRef").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); refresh(); });
+    $("smBase").querySelectorAll(".chip").forEach((c) => c.onclick = () => { baseMode = c.dataset.m; $("smBase").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
+    $("smPreset").onchange = () => refresh();
+    const baseCredits = () => baseMode === "reuse" ? 0 : cost(baseMode === "fast" ? "model_fast" : "model_balanced") + cost("face_reference");
+    const refresh = () => {
+      reuse = state.models.find((m) => m.kind === "ai_self" && m.style && styleKey(m.style) === styleKey(st)) || null;   // same photo + pose + hair + scene already generated
+      $("smReuse").classList.toggle("hidden", !reuse); if (!reuse && baseMode === "reuse") { baseMode = "fast"; $("smBase").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k.dataset.m === "fast")); }
+      const per = pc($("smPreset").value), total = baseCredits() + per * items.length;
+      $("smCost").textContent = `${total} credits: ${baseMode === "reuse" ? "reuse the base you already made" : "base picture of you (" + baseCredits() + ")"} + ${items.length} item${items.length === 1 ? "" : "s"} × ${per}. You can stop after any item.`;
+      $("smFidNote").textContent = st.fidelity === "exact" ? "Labelled \"Product preview\". AI try-on renders each product photo as closely as it can, but colours, prints and fit can still differ — if it does, switch to Get the Look. The collage is always the exact reference." : "Labelled \"Get the look\": a styling preview of you, not proof of the exact products. Shoppable links always point to the real items.";
+    };
+    refresh(); fillImgs($("sheetBody"));
+    $("smGo").onclick = async () => {
+      const ref = state.selfies.find((s) => s.id === st.ref_selfie_id); if (!ref) { note("smMsg", "Pick a reference photo of yourself.", true); return; }
+      const preset = $("smPreset").value, per = pc(preset), total = baseCredits() + per * items.length;
+      if (!confirmSpend(total, `Style me in "${o.name}": ${baseMode === "reuse" ? "reuse base" : "new base picture of you"} + ${items.length} try-on pass${items.length === 1 ? "" : "es"}.`)) return;
+      $("smGo").disabled = true; $("smSteps").innerHTML = ""; $("smAfter").innerHTML = "";
+      try {
+        let base = reuse && baseMode === "reuse" ? { model_id: reuse.id, path: reuse.path } : null, used = 0;
+        if (!base) {
+          note("smMsg", "Making the base picture of you…");
+          const name = `Me · ${[optOf(POSES, st.pose)[1], optOf(HAIRS, st.hair)[1], optOf(SCENES, st.background)[1]].filter((x) => x !== "As in my photo").join(" · ") || "as in my photo"}`.slice(0, 80);
+          const r = await runAndWait("/model-create", { prompt: identityPrompt(st), mode: baseMode, name, face_path: ref.path, kind: "ai_self", scene: "natural", face_mode: st.face_mode,
+            style: { pose: st.pose, hair: st.hair, background: st.background, face_mode: st.face_mode, ref_selfie_id: st.ref_selfie_id } }, (t) => note("smMsg", "Base: " + t));
+          base = r; used += r.credits;
+          $("smSteps").insertAdjacentHTML("beforeend", `<div class="tile"><img data-path="${esc(r.path)}" alt=""><span class="cap">Base · you</span></div>`); fillImgs($("smSteps"));
+          if (!confirm(`Base picture ready (${r.credits} credits). Does it look like you? Continue with the outfit (${per * items.length} credits), or Cancel to keep just the base under My Models → AI me.`)) { note("smMsg", `Stopped after the base — ${used} credits. It is saved under My Models → AI me.`); loadAll(); $("smGo").disabled = false; return; }
+        }
+        const meta = { model_id: base.model_id, outfit_id: o.id, selfie_id: null, style: { pose: st.pose, hair: st.hair, background: st.background, fidelity: st.fidelity, base_model_id: base.model_id, ref_selfie_id: st.ref_selfie_id } };
+        let prev = base.path, last = null;
+        for (let i = 0; i < items.length; i++) {
+          const g = items[i]; note("smMsg", `Item ${i + 1}/${items.length}: ${itemLabel(g)}…`);
+          const r = await runAndWait("/run", { preset, selfie_path: prev, garment_path: g.path, prompt: fitHint(g) || undefined, meta: { ...meta, kind: "outfit_step", garment_id: g.id, step: i + 1 } }, (t) => note("smMsg", `Item ${i + 1}/${items.length}: ${t}`));
+          prev = r.path; used += r.credits; last = r;
+          $("smSteps").insertAdjacentHTML("beforeend", `<div class="tile"><img data-path="${esc(r.path)}" alt=""><span class="cap">${i + 1}. ${esc(itemLabel(g))}</span></div>`); fillImgs($("smSteps"));
+          if (i < items.length - 1 && !confirm(`Item ${i + 1} done. Continue with "${itemLabel(items[i + 1])}" (${per} more credits)?`)) break;
+        }
+        note("smMsg", `Done — ${used} credits. Saved to My Photos, labelled "${fidelityLabel(meta.style)}".`);
+        if (last) { $("smAfter").innerHTML = `<button class="btn secondary" id="smHero">Set as outfit cover</button>`; $("smHero").onclick = async () => { await sb.from("outfits").update({ hero_generation_id: last.generation_id }).eq("id", o.id); await loadAll(); note("smMsg", "Outfit cover updated."); }; }
+        loadAll();
+      } catch (e) { note("smMsg", e.message, true); }
+      $("smGo").disabled = false;
+    };
   }
 
   // ================================================================== COLLAGES
@@ -2382,7 +2522,9 @@ const ReelEngine = (() => {
     const links = opts.listLinks ? linkedItems(items).map((g) => `${itemLabel(g)}: ${g.affiliate_url}`).join("\n") : "";
     const tags = (s.hashtags || "#ootd #outfitinspo #amazonfinds #amazonfashion").trim().split(/\s+/).slice(0, 4).join(" ");
     const shop = url ? (dest === "home" ? `Shop my looks: ${url}` : `Shop this look: ${url}`) + (s.handle ? ` (also in my bio ${s.handle})` : " (also in my bio)") : (s.handle ? `Links in my bio ${s.handle}` : "Links in my bio");
-    return [pick(hooks), shop, links, `${(s.disclosure || DEFAULT_DISCLOSURE).trim()} #ad`, tags].filter(Boolean).join("\n\n");
+    const hero = state.generations.find((g) => g.id === o.hero_generation_id);
+    const gtl = hero?.style?.fidelity === "inspiration" ? "Get the look: the picture is an AI styling preview of me; the linked pieces are the real items." : "";
+    return [pick(hooks), shop, links, gtl, `${(s.disclosure || DEFAULT_DISCLOSURE).trim()} #ad`, tags].filter(Boolean).join("\n\n");
   }
   $("rlPreviewBtn").onclick = async () => {
     try { stopReelPreview(); await buildReelSpec(); $("rlPreviewWrap").classList.remove("hidden"); rl.stop = ReelEngine.preview($("rlPreview"), rl.spec, rl.assets, (t) => note("rlMsg", `Preview ${t.toFixed(1)}s / ${rl.spec.duration}s`)); $("rlPreviewWrap").scrollIntoView({ behavior: "smooth", block: "center" }); }
