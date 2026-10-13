@@ -55,6 +55,9 @@
   .tile.add{display:grid;place-items:center;border:1.5px dashed var(--line);color:var(--muted);font-size:14px;background:transparent;text-align:center;padding:6px}
   .tile.sel{outline:3px solid var(--ring);outline-offset:-3px}
   .tile.sq{aspect-ratio:4/5}
+  .tilewrap{position:relative} .tilewrap .tile{width:100%} .tilewrap .cap{padding-right:36px}
+  .tilewrap .more{position:absolute;right:5px;bottom:5px;width:30px;height:26px;border:0;border-radius:8px;background:rgba(0,0,0,.5);color:#fff;font-size:18px;line-height:1;cursor:pointer}
+  .tilewrap .more:focus-visible{outline:2px solid #fff}
   .strip{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;scroll-snap-type:x proximity}
   .strip .tile{flex:0 0 96px;scroll-snap-align:start}
   .msg{font-size:14px;min-height:1.4em;margin-top:6px}
@@ -68,8 +71,10 @@
   .ofit .tile img{object-fit:contain;background:#fff}
   .tab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   .tab.on{color:var(--accent);font-weight:600}
-  .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:20;display:none}
-  .sheet{position:fixed;left:0;right:0;bottom:0;max-height:92dvh;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));z-index:21;display:none;box-shadow:0 -6px 30px rgba(0,0,0,.2)}
+  /* Sheets must sit above the full-screen editor and importer (z-index 30/31), otherwise the person picker and
+     Share sheet open invisibly behind them ("Me + outfit" / "+ Person" appeared to do nothing). */
+  .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:40;display:none}
+  .sheet{position:fixed;left:0;right:0;bottom:0;max-height:92dvh;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));z-index:41;display:none;box-shadow:0 -6px 30px rgba(0,0,0,.2)}
   .sheet.open,.sheet-bg.open{display:block}
   .sheet .handle{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
   .big{width:100%;border-radius:12px;display:block;background:var(--soft)}
@@ -136,7 +141,7 @@
   <section id="tab-models">
     <h2>My Models</h2>
     <p class="hint">Your photos, AI versions of you, and reusable AI models. Tap one for options.</p>
-    <div class="chips" id="modelFilter" style="margin-bottom:10px"><button class="chip on" data-f="all">All</button><button class="chip" data-f="photo">My photos</button><button class="chip" data-f="ai_self">AI me</button><button class="chip" data-f="ai_model">AI models</button><button class="chip" data-f="default">Defaults</button></div>
+    <div class="chips" id="modelFilter" style="margin-bottom:10px"><button class="chip on" data-f="all">All</button><button class="chip" data-f="photo">My photos</button><button class="chip" data-f="ai_self">AI me</button><button class="chip" data-f="ai_model">AI models</button><button class="chip" data-f="default">Presets</button></div>
     <div class="grid" id="modelGrid"></div>
     <input id="selfieFile" type="file" accept="image/*" multiple class="hidden">
   </section>
@@ -197,7 +202,9 @@
   <section id="tab-collages" class="hidden">
     <h2>Collages</h2>
     <p class="hint">Clothing only, you + outfit, or an AI model + outfit. Tap one to edit.</p>
-    <div class="row" style="margin-bottom:10px"><button class="btn secondary" id="fbQueueBtn">Facebook queue</button></div>
+    <div class="row" style="margin-bottom:10px"><button class="btn secondary" id="fbQueueBtn">Facebook queue</button><button class="btn secondary" id="selCollages">Select</button></div>
+    <div class="row hidden" id="colBar" style="margin-bottom:10px"><button class="btn danger small" id="colDelSel" disabled>Delete selected</button><span class="kv" id="colCount">Tap collages to select them.</span></div>
+    <div id="colMsg" class="msg"></div>
     <div class="grid" id="collageGrid"></div>
   </section>
 
@@ -656,6 +663,61 @@ const ReelEngine = (() => {
     if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch {} }
     else { window.open(URL.createObjectURL(blob), "_blank"); alert("Long-press the image and choose Save to Photos."); }
   }
+  // ------------------------------------------------------------------ free transparent cutouts
+  // FASHN Edit ("Extract clothing") returns the garment on an opaque white rectangle (<id>_x.png). Removing only the white
+  // that is connected to the image border leaves the garment itself untouched — shape, colour and texture — and lets the
+  // collage background show around it, with no AI call. Light garments can fool a border fill, so the result is measured
+  // and flagged "difficult" instead of being applied; the paid FASHN background-remove (<id>_t.png) stays as the fallback.
+  // Files: _x.png = white (kept), _c.png = free transparent, _t.png = AI transparent. garments.cutout_path = the one in use.
+  const cutBase = (g) => (g.path || "").replace(/\.jpg$/, "");
+  const cutPaths = (g) => ({ white: cutBase(g) + "_x.png", free: cutBase(g) + "_c.png", ai: cutBase(g) + "_t.png" });
+  const isTransparentCut = (p) => /_(c|t)\.png$/.test(p || "");
+  async function makeTransparent(blob) {
+    const img = await loadImg(URL.createObjectURL(blob)); const W = img.width, H = img.height, N = W * H;
+    const c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0); const id = ctx.getImageData(0, 0, W, H), d = id.data;
+    const white = (i) => d[i * 4] >= 235 && d[i * 4 + 1] >= 235 && d[i * 4 + 2] >= 235 && d[i * 4 + 3] > 0;
+    const seen = new Uint8Array(N), stack = new Int32Array(N); let sp = 0, removed = 0;
+    const push = (i) => { if (!seen[i] && white(i)) { seen[i] = 1; stack[sp++] = i; } };
+    for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); } for (let y = 0; y < H; y++) { push(y * W); push(y * W + W - 1); }
+    while (sp) { const i = stack[--sp]; removed++; const x = i % W, y = (i - x) / W; if (x > 0) push(i - 1); if (x < W - 1) push(i + 1); if (y > 0) push(i - W); if (y < H - 1) push(i + W); }
+    if (removed < N * 0.02) return { difficult: true, reason: "this image has no white background to remove" };
+    let x0 = W, x1 = -1, y0 = H, y1 = -1, solid = 0;
+    for (let i = 0; i < N; i++) {
+      if (seen[i]) { d[i * 4 + 3] = 0; continue; }
+      const x = i % W, y = (i - x) / W; solid++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      // soft rim: garment pixels touching the removed background fade with brightness, so anti-aliased edges leave no white halo
+      if ((x > 0 && seen[i - 1]) || (x < W - 1 && seen[i + 1]) || (y > 0 && seen[i - W]) || (y < H - 1 && seen[i + W])) {
+        const lum = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3; if (lum > 200) d[i * 4 + 3] = Math.max(0, Math.min(255, Math.round(((255 - lum) * 255) / 55)));
+      }
+    }
+    const kept = solid / N, fill = solid / Math.max(1, (x1 - x0 + 1) * (y1 - y0 + 1));
+    const difficult = kept < 0.05 || fill < 0.15;   // a light garment eaten by the fill leaves a sparse, ragged remainder
+    ctx.putImageData(id, 0, 0);
+    return { blob: await new Promise((r) => c.toBlob(r, "image/png")), kept, fill, difficult, reason: difficult ? "this item is too light to separate from the white background" : "" };
+  }
+  // Make the free transparent cutout the one collages use. Never deletes or overwrites the white version or the product photo.
+  async function ensureTransparent(g) {
+    if (isTransparentCut(g.cutout_path)) return { ok: true, already: true };
+    if (!g.cutout_path) return { ok: false, reason: "no extracted cutout yet" };
+    const p = cutPaths(g); const r = await makeTransparent(await blobOf(g.cutout_path));
+    if (r.difficult) return { ok: false, difficult: true, reason: r.reason };
+    await upload(p.free, r.blob);
+    const { error } = await sb.from("garments").update({ cutout_path: p.free }).eq("id", g.id).eq("user_id", state.uid);
+    if (error) return { ok: false, reason: error.message };
+    return { ok: true, path: p.free };
+  }
+  // Switch which cutout collages use (white or transparent); both files stay in storage.
+  async function useCutout(g, which) {
+    const p = cutPaths(g);
+    if (which === "white") { const { error } = await sb.from("garments").update({ cutout_path: p.white }).eq("id", g.id).eq("user_id", state.uid); return error ? { ok: false, reason: error.message } : { ok: true }; }
+    if (/_t\.png$/.test(g.cutout_path || "")) return { ok: true, already: true };
+    // prefer an AI cutout made earlier, else make the free one
+    const ai = await blobOf(p.ai).catch(() => null);
+    if (ai && ai.size > 0 && ai.type === "image/png") { const { error } = await sb.from("garments").update({ cutout_path: p.ai }).eq("id", g.id).eq("user_id", state.uid); return error ? { ok: false, reason: error.message } : { ok: true }; }
+    return ensureTransparent({ ...g, cutout_path: p.white });
+  }
+
   // Is this image already a clean product shot? (transparent, or near-white edges)
   async function looksClean(blob) {
     const img = await loadImg(URL.createObjectURL(blob)); const c = document.createElement("canvas"); c.width = 64; c.height = 64; const ctx = c.getContext("2d");
@@ -716,9 +778,11 @@ const ReelEngine = (() => {
   function renderModels() {
     const g = $("modelGrid"); const f = state.modelFilter;
     const photos = f === "all" || f === "photo" ? state.selfies.map((s) => ({ kind: "selfie", row: s, label: s.label || "My photo" })) : [];
-    const ai = state.models.filter((m) => f === "all" || m.kind === f).map((m) => ({ kind: "model", row: m, label: m.name }));
+    // Presets (kind "default") are the shared library, readable by every Studio user; personal models are listed first.
+    const mine = state.models.filter((m) => m.kind !== "default"), presets = state.models.filter((m) => m.kind === "default");
+    const ai = [...mine, ...presets].filter((m) => f === "all" || m.kind === f).map((m) => ({ kind: "model", row: m, label: m.name }));
     g.innerHTML = `<button class="tile add" id="addSelfie">+ Add my photo</button><button class="tile add" id="genModel">✦ Generate model</button>` +
-      [...photos, ...ai].map((e) => `<button class="tile" data-kind="${e.kind}" data-id="${e.row.id}"><img data-path="${esc(e.row.thumb_path || e.row.path)}" alt="">${e.row.cutout_path ? '<span class="badge">cutout</span>' : ""}<span class="cap">${esc(e.label)}</span></button>`).join("");
+      [...photos, ...ai].map((e) => `<button class="tile" data-kind="${e.kind}" data-id="${e.row.id}"><img data-path="${esc(e.row.thumb_path || e.row.path)}" alt="">${e.row.kind === "default" ? '<span class="badge">preset</span>' : e.row.cutout_path ? '<span class="badge">cutout</span>' : ""}<span class="cap">${esc(e.label)}</span></button>`).join("");
     $("addSelfie").onclick = () => $("selfieFile").click();
     $("genModel").onclick = () => modelGenSheet();
     g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => personSheet(t.dataset.kind, t.dataset.id));
@@ -738,19 +802,20 @@ const ReelEngine = (() => {
   function personSheet(kind, id) {
     const p = person(kind, id); if (!p) return;
     const table = { selfie: "selfies", model: "models", generation: "generations" }[kind];
+    const shared = kind === "model" && p.kind === "default", owner = p.user_id === state.uid;   // presets are shared read-only unless you own them
     openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Photo</button>${p.cutout_path ? '<button class="chip" data-v="cutout_path">Cutout</button>' : ""}</div>
       <img class="big" id="pImg" data-path="${esc(p.path)}" alt="">
-      ${p.prompt ? `<p class="kv" style="margin:8px 0">${esc(p.prompt)}</p>` : ""}
+      ${shared ? '<p class="kv" style="margin:8px 0">Preset model from the shared library.</p>' : ""}${p.prompt && (!shared || owner) ? `<p class="kv" style="margin:8px 0">${esc(p.prompt)}</p>` : ""}
       <div class="stack" style="margin-top:12px">
-        ${kind !== "generation" ? `<div><label>Name</label><input type="text" id="pName" value="${esc(p.label)}"></div>` : ""}
+        ${kind !== "generation" && owner ? `<div><label>Name</label><input type="text" id="pName" value="${esc(p.label)}"></div>` : ""}
         <button class="btn" id="pUse">Use in Try-On</button>
-        <button class="btn secondary" id="pCut">${p.cutout_path ? "Redo person cutout" : "Person cutout (remove background)"} · ${cost("bgremove")} credit</button>
+        ${owner ? `<button class="btn secondary" id="pCut">${p.cutout_path ? "Redo person cutout" : "Person cutout (remove background)"} · ${cost("bgremove")} credit</button>` : ""}
         <button class="btn secondary" id="pSave">Save to Photos</button>
         ${kind === "generation" ? '<button class="btn secondary" id="pAsModel">Save as model</button>' : ""}
-        <button class="btn danger" id="pDel">Delete</button><div id="pMsg" class="msg"></div></div>`);
+        ${owner ? '<button class="btn danger" id="pDel">Delete</button>' : ""}<div id="pMsg" class="msg"></div></div>`);
     $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("pImg").src = await url(p[c.dataset.v]); });
     $("pUse").onclick = () => { state.sel.selfie = kind === "model" ? null : (kind === "selfie" ? id : null); state.sel.model = kind === "model" ? id : (kind === "generation" ? "gen:" + id : null); closeSheet(); renderPickers(); showTab("tryon"); };
-    $("pCut").onclick = async () => {
+    if ($("pCut")) $("pCut").onclick = async () => {
       if (!confirmSpend(cost("bgremove"), "Remove the background around the person (transparent PNG for collages).")) return;
       try { note("pMsg", "Cutting out…"); await runAndWait("/bgremove", { target: kind, id }, (t) => note("pMsg", t)); await loadAll(); personSheet(kind, id); note("pMsg", "Cutout ready — see the Cutout tab above."); }
       catch (e) { note("pMsg", e.message, true); }
@@ -758,7 +823,7 @@ const ReelEngine = (() => {
     $("pSave").onclick = async () => saveToPhotos(await blobOf(p.path), "closetiq-studio.jpg");
     const nameEl = $("pName"); if (nameEl) nameEl.onchange = async () => { await sb.from(table).update(kind === "selfie" ? { label: nameEl.value.trim() } : { name: nameEl.value.trim() }).eq("id", id); loadAll(); };
     if (kind === "generation") $("pAsModel").onclick = async () => { await addSelfieFromBlob(await blobOf(p.path), "AI me"); await loadAll(); note("pMsg", "Saved under My Models → My photos."); };
-    $("pDel").onclick = async () => { if (!confirm("Delete this?")) return; await removeFiles([p.path, p.thumb_path, p.cutout_path]); await sb.from(table).delete().eq("id", id); closeSheet(); await loadAll(); };
+    if ($("pDel")) $("pDel").onclick = async () => { if (!confirm(shared ? "Delete this preset model? It disappears for every Studio user." : "Delete this?")) return; await removeFiles([p.path, p.thumb_path, p.cutout_path]); await sb.from(table).delete().eq("id", id); closeSheet(); await loadAll(); };
   }
   function modelGenSheet() {
     let face = null, m = "fast";
@@ -923,11 +988,15 @@ const ReelEngine = (() => {
         const id = crypto.randomUUID(), base = `${state.uid}/garments/${id}`;
         const [source, full, thumb] = await Promise.all([shrink(file, 1600), cropped(), shrink(file, 480, "image/jpeg", 0.8, crop)]);
         await upload(base + "_src.jpg", source); await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
-        let cutout_path = null;
-        if (cutout) { cutout_path = base + "_x.png"; await upload(cutout_path, cutout); if (cutoutPath) removeFiles([cutoutPath]); }
+        let cutout_path = null, cutNote = "";
+        if (cutout) {
+          cutout_path = base + "_x.png"; await upload(cutout_path, cutout); if (cutoutPath) removeFiles([cutoutPath]);
+          try { const t = await makeTransparent(cutout); if (!t.difficult) { await upload(base + "_c.png", t.blob); cutout_path = base + "_c.png"; } else cutNote = ` Transparent cutout skipped: ${t.reason}. The white version is used; AI background removal (${cost("bgremove")} credit) is available on the item.`; }
+          catch (e) { cutNote = " Transparent cutout failed: " + e.message; }   // the white cutout is still saved
+        }
         const { error } = await sb.from("garments").insert({ id, source_path: base + "_src.jpg", path: base + ".jpg", thumb_path: base + "_t.jpg", cutout_path, ...readGarmentFields() });
         if (error) throw new Error(error.message);
-        closeImporter(); await loadAll();
+        closeImporter(); await loadAll(); if (cutNote) alert("Saved." + cutNote);
         if (prefill.onSaved) prefill.onSaved(id); else showTab("clothing");
       } catch (e) { note("iwMsg", e.message, true); $("iwSave").disabled = false; }
     };
@@ -935,8 +1004,10 @@ const ReelEngine = (() => {
   function garmentSheet(id) {
     const x = garment(id); if (!x) return;
     if (isApi(x)) return apiGarmentSheet(x);
-    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip ${x.cutout_path ? "" : "on"}" data-v="path">Product photo</button>${x.cutout_path ? '<button class="chip on" data-v="cutout_path">Clean cutout</button>' : ""}${x.source_path ? '<button class="chip" data-v="source_path">Original upload</button>' : ""}</div>
-      <img class="big contain" id="gImg" data-path="${esc(x.cutout_path || x.path)}" alt="">
+    const cp = cutPaths(x), transparent = isTransparentCut(x.cutout_path);
+    openSheet(`<div class="chips" style="margin-bottom:8px">${x.cutout_path ? `<button class="chip on" data-p="${esc(x.cutout_path)}">${transparent ? "Transparent cutout" : "White cutout"}</button>` : ""}${transparent ? `<button class="chip" data-p="${esc(cp.white)}">White cutout</button>` : ""}<button class="chip ${x.cutout_path ? "" : "on"}" data-p="${esc(x.path)}">Product photo</button>${x.source_path ? `<button class="chip" data-p="${esc(x.source_path)}">Original upload</button>` : ""}</div>
+      <img class="big contain" id="gImg" data-path="${esc(x.cutout_path || x.path)}" alt="" style="background:${transparent ? "repeating-conic-gradient(#e9e4da 0 25%, #fff 0 50%) 0 0 / 20px 20px" : "#fff"}">
+      ${x.cutout_path ? `<div style="margin-top:8px"><label>Collages use</label><div class="chips" id="gUse"><button class="chip ${transparent ? "on" : ""}" data-use="transparent">Transparent (free)</button><button class="chip ${transparent ? "" : "on"}" data-use="white">White background</button></div><p class="hint" id="gUseNote" style="margin:6px 0 0">${transparent ? "Only the clothing shows; the collage background fills around it." : "Tap Transparent to remove the white box for free. Light items may need the AI option below instead."}</p></div>` : ""}
       <div class="stack" style="margin-top:12px">${garmentFields(x)}
         <button class="btn" id="gUpdate">Save changes</button>
         <button class="btn secondary" id="gTry">Try on</button>
@@ -944,7 +1015,14 @@ const ReelEngine = (() => {
         <button class="btn secondary" id="gBg" ${x.cutout_path ? "" : "disabled"}>Make background transparent · ${cost("bgremove")} credit</button>
         ${x.affiliate_url ? `<a class="btn secondary" href="${esc(x.affiliate_url)}" target="_blank" rel="noopener">Open Amazon link</a>` : ""}
         <button class="btn danger" id="gDel">Delete</button><div id="gMsg" class="msg"></div></div>`);
-    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("gImg").src = await url(x[c.dataset.v]); });
+    $("sheetBody").querySelectorAll(".chip[data-p]").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip[data-p]").forEach((k) => k.classList.toggle("on", k === c)); $("gImg").style.background = isTransparentCut(c.dataset.p) ? "repeating-conic-gradient(#e9e4da 0 25%, #fff 0 50%) 0 0 / 20px 20px" : "#fff"; $("gImg").src = await url(c.dataset.p); });
+    if (x.cutout_path) $("gUse").querySelectorAll("[data-use]").forEach((c) => c.onclick = async () => {
+      if (c.classList.contains("on")) return; note("gMsg", c.dataset.use === "white" ? "Switching…" : "Making the transparent cutout…");
+      try { const r = await useCutout(x, c.dataset.use);
+        if (r.ok) { await loadAll(); garmentSheet(x.id); note("gMsg", c.dataset.use === "white" ? "Collages now use the white version." : "Transparent cutout ready — no credits used."); }
+        else note("gMsg", r.difficult ? `Free transparent cutout skipped: ${r.reason}. Use "Make background transparent" (${cost("bgremove")} credit) below for an AI cutout; the white version stays in use.` : r.reason, true);
+      } catch (e) { note("gMsg", e.message, true); }
+    });
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
     $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
     $("gTry").onclick = () => { state.sel.garment = x.id; state.sel.src = "path"; closeSheet(); renderPickers(); showTab("tryon"); };
@@ -975,7 +1053,13 @@ const ReelEngine = (() => {
   async function spendAction(path, credits, what, x) {
     if (!confirmSpend(credits, what)) return;
     try { note("gMsg", "Working…"); const r = await runAndWait(path, { garment_id: x.id }, (t) => note("gMsg", t));
-      state.urls.delete(r.cutout_path); state.blobs.delete(r.cutout_path); await loadAll(); garmentSheet(x.id); note("gMsg", `Done — ${r.credits} credit used.`);
+      state.urls.delete(r.cutout_path); state.blobs.delete(r.cutout_path); await loadAll();
+      let extra = "";
+      if (path === "/extract") {   // new white cutout → make the free transparent version the default when it is safe
+        try { const t = await ensureTransparent(garment(x.id)); extra = t.ok ? " Transparent cutout made for free." : t.difficult ? ` Transparent cutout skipped: ${t.reason}. White version in use; AI background removal (${cost("bgremove")} credit) is available below.` : ""; await loadAll(); }
+        catch (e) { extra = " (Transparent cutout failed: " + e.message + ")"; }
+      }
+      garmentSheet(x.id); note("gMsg", `Done — ${r.credits} credit used.${extra}`);
     } catch (e) { note("gMsg", e.message, true); }
   }
 
@@ -1169,9 +1253,7 @@ const ReelEngine = (() => {
       if (!own.length) return alert("Collages can only use your own imported photos — Amazon-API product images can't be stored or edited under Amazon's rules.");
       const layout = old ? { v: 2, mode: "clothing", size: "portrait", bg: BG_NAMED[o.layout.bg] || "#f6efe4", layers: o.layout.boxes.filter((b) => !isApi(garment(b.g))).map((b) => ({ id: newId(), kind: "item", g: b.g, x: b.x + b.w / 2, y: b.y + b.w * 0.6, w: b.w, rot: 0 })) }
                          : makeLayout(own.map((g) => g.id), "grid");
-      const { data, error } = await sb.from("collages").insert({ name: o.name, outfit_id: o.id, layout }).select("*").single();
-      if (error) return alert(error.message);
-      await loadAll(); openEditor(data);
+      openEditor({ id: crypto.randomUUID(), name: o.name, outfit_id: o.id, layout, preview_path: null, _draft: true });   // saved to the database on first Save only
     };
     $("oTry").onclick = () => { const own = items.filter((g) => !isApi(g)); if (!own.length) { note("oMsg", "This outfit only has Amazon-API products, which can't be used for try-on.", true); return; } outfitTrySheet(o, own); };
     $("oEdit").onclick = () => outfitEditor(o);
@@ -1270,13 +1352,64 @@ const ReelEngine = (() => {
     const layout = { v: 2, mode: "clothing", size, bg: "#f6efe4", layers: garmentIds.map((g) => ({ id: newId(), kind: "item", g, x: 0.5, y: 0.5, w: 0.3, rot: 0 })) };
     applyPreset(layout, preset); return layout;
   }
+  // Collage grid. Each tile has a ⋯ menu (Open / Delete); "Select" switches to multi-select with one confirmation.
+  let colSel = null;   // null = normal browsing; a Set of collage ids while selecting
   function renderCollages() {
-    const g = $("collageGrid");
-    g.innerHTML = `<button class="tile add sq" id="addCollage">+ New collage</button>` +
-      state.collages.map((c) => `<button class="tile sq" data-id="${c.id}"><img data-path="${esc(c.preview_path || "")}" alt=""><span class="cap">${esc(c.name)}</span>${c.layout?.mode && c.layout.mode !== "clothing" ? `<span class="badge">${c.layout.mode === "me" ? "me" : "model"}</span>` : ""}</button>`).join("");
-    $("addCollage").onclick = () => newCollageSheet(null);
-    g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => openEditor(state.collages.find((c) => c.id === t.dataset.id)));
+    const g = $("collageGrid"), selecting = !!colSel;
+    if (selecting) colSel = new Set([...colSel].filter((id) => state.collages.some((c) => c.id === id)));   // drop ids that no longer exist
+    const badge = (c) => c.layout?.mode && c.layout.mode !== "clothing" ? `<span class="badge">${c.layout.mode === "me" ? "me" : "model"}</span>` : "";
+    g.innerHTML = (selecting ? "" : `<button class="tile add sq" id="addCollage">+ New collage</button>`) +
+      state.collages.map((c) => `<div class="tilewrap"><button class="tile sq ${selecting && colSel.has(c.id) ? "sel" : ""}" data-id="${c.id}" aria-pressed="${selecting ? colSel.has(c.id) : "false"}">${c.preview_path ? `<img data-path="${esc(c.preview_path)}" alt="">` : '<span class="badge" style="right:auto;left:6px">not saved yet</span>'}<span class="cap">${esc(c.name)}</span>${badge(c)}</button>${selecting ? "" : `<button class="more" data-more="${c.id}" aria-label="Options for ${esc(c.name)}" title="Options">⋯</button>`}</div>`).join("")
+      || (selecting ? '<div class="empty">No collages to select.</div>' : "");
+    if (!selecting) $("addCollage").onclick = () => newCollageSheet(null);
+    g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => {
+      const c = state.collages.find((x) => x.id === t.dataset.id); if (!c) return;
+      if (!selecting) return openEditor(c);
+      colSel.has(c.id) ? colSel.delete(c.id) : colSel.add(c.id); t.classList.toggle("sel", colSel.has(c.id)); t.setAttribute("aria-pressed", colSel.has(c.id)); updateColBar();
+    });
+    g.querySelectorAll("[data-more]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); collageMenu(b.dataset.more); });
+    $("selCollages").textContent = selecting ? "Done" : "Select"; $("colBar").classList.toggle("hidden", !selecting); updateColBar();
     fillImgs(g);
+  }
+  function updateColBar() {
+    if (!colSel) return; const n = colSel.size;
+    $("colDelSel").disabled = !n; $("colDelSel").textContent = n ? `Delete ${n} selected` : "Delete selected";
+    $("colCount").textContent = n ? `${n} of ${state.collages.length} selected` : "Tap collages to select them.";
+  }
+  $("selCollages").onclick = () => { colSel = colSel ? null : new Set(); note("colMsg", ""); renderCollages(); };
+  $("colDelSel").onclick = () => deleteCollages([...colSel]);
+  function collageMenu(id) {
+    const c = state.collages.find((x) => x.id === id); if (!c) return;
+    const sp = shopOf(c.id), mode = MODES[c.layout?.mode || "clothing"] || "Collage", items = (c.layout?.layers || []).filter((l) => l.kind === "item").length;
+    openSheet(`<h3>${esc(c.name)}</h3>
+      <p class="kv" style="margin:0 0 10px">${esc(mode)} · ${items} item${items === 1 ? "" : "s"} · ${c.preview_path ? "saved " + esc(new Date(c.updated_at).toLocaleString()) : "never saved (opened " + esc(new Date(c.created_at).toLocaleString()) + ")"}${sp?.published ? " · Shop page published" : ""}</p>
+      <div class="stack"><button class="btn" id="cmOpen">Open</button>
+        <button class="btn danger" id="cmDel">Delete collage</button></div>`);
+    $("cmOpen").onclick = () => { closeSheet(); openEditor(c); };
+    $("cmDel").onclick = () => { closeSheet(); deleteCollages([c.id]); };
+  }
+  // Deletes ONLY the given collages (own rows, by id) and their preview images. Clothing, links, photos, models,
+  // outfits, reels and Facebook posts are never touched: their collage_id references simply become null (DB: on
+  // delete set null). A published Shop page of a deleted collage is unpublished first, as the editor's Delete does.
+  async function deleteCollages(ids) {
+    const rows = [...new Set(ids)].map((id) => state.collages.find((c) => c.id === id)).filter(Boolean);
+    if (!rows.length) { note("colMsg", "Nothing selected.", true); return; }
+    // Published content is never changed by Delete: a collage with a live Shop page must be unpublished explicitly first.
+    const live = rows.filter((c) => shopOf(c.id)?.published);
+    if (live.length) { note("colMsg", `${live.length === 1 ? `"${live[0].name}" has` : `${live.length} of these have`} a live Shop page. Delete never changes published pages — unpublish from the collage's Share / Publish first, or leave ${live.length > 1 ? "them" : "it"} out of the selection.`, true); return; }
+    const what = rows.length === 1 ? `Delete "${rows[0].name}"?` : `Delete these ${rows.length} collages?\n\n${rows.map((c) => "• " + c.name).join("\n")}`;
+    const keep = `Only the collage${rows.length > 1 ? "s" : ""} and ${rows.length > 1 ? "their" : "its"} preview image will be removed. Clothing, links, photos, models, outfits, reels and Facebook posts stay.`;
+    if (!confirm(`${what}\n\n${keep}\n\nThis can't be undone.`)) return;
+    $("colDelSel").disabled = true; note("colMsg", "Deleting…");
+    try {
+      const { data, error } = await sb.from("collages").delete().in("id", rows.map((c) => c.id)).eq("user_id", state.uid).select("id");
+      if (error) throw new Error(error.message);
+      const gone = new Set((data || []).map((r) => r.id));
+      await removeFiles(rows.filter((c) => gone.has(c.id)).map((c) => c.preview_path));
+      const missed = rows.filter((c) => !gone.has(c.id));
+      await loadAll();
+      note("colMsg", gone.size ? `Deleted ${gone.size} collage${gone.size > 1 ? "s" : ""}.${missed.length ? ` ${missed.length} could not be found (already deleted?).` : ""}` : "Nothing was deleted — the collage(s) could not be found.", !gone.size);
+    } catch (e) { note("colMsg", "Delete failed: " + e.message + " Nothing else was changed.", true); await loadAll(); }
   }
   function newCollageSheet(outfit) {
     const chosen = new Set((outfit ? outfit.items : []).filter((id) => !isApi(garment(id)))); let preset = "grid", mode = "clothing";
@@ -1291,10 +1424,12 @@ const ReelEngine = (() => {
     $("cMode").querySelectorAll(".chip").forEach((c) => c.onclick = () => { mode = c.dataset.m; $("cMode").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("cPresetWrap").classList.toggle("hidden", mode !== "clothing"); });
     $("cCreate").onclick = async () => {
       if (!chosen.size) { $("cMsg").textContent = "Pick at least one item."; return; }
+      $("cCreate").disabled = true;   // a double tap must not open the editor twice
       const layout = makeLayout([...chosen], preset); layout.mode = mode;
-      const { data, error } = await sb.from("collages").insert({ name: $("cName").value.trim() || "Untitled collage", outfit_id: outfit?.id || null, layout }).select("*").single();
-      if (error) { $("cMsg").textContent = error.message; return; }
-      closeSheet(); await loadAll(); await openEditor(data);
+      // Nothing is written to the database here. The row is created by the first Save (edSave), so closing the
+      // editor without saving leaves no blank "Untitled collage" behind. The id is fixed now so Save can't duplicate.
+      const name = $("cName").value.trim() || "Untitled collage";   // read before closeSheet() empties the sheet
+      closeSheet(); await openEditor({ id: crypto.randomUUID(), name, outfit_id: outfit?.id || null, layout, preview_path: null, _draft: true });
       if (mode !== "clothing") pickPersonSheet();
     };
   }
@@ -1316,7 +1451,7 @@ const ReelEngine = (() => {
     ed.c = c; ed.layout = c.layout && c.layout.layers ? JSON.parse(JSON.stringify(c.layout)) : makeLayout([], "grid");
     ed.layout.size = ed.layout.size || "portrait"; ed.layout.bg = ed.layout.bg || "#f6efe4"; ed.layout.mode = ed.layout.mode || "clothing";
     ed.sel = null; ed.hist = [snapshot()]; ed.hi = 0; ed.dirty = false; updateUndo();
-    $("edName").value = c.name; $("edMsg").textContent = "";
+    $("edName").value = c.name; $("edMsg").textContent = ""; if (c._draft) note("edMsg", "Not saved yet — tap Save to keep this collage.");
     $("editor").classList.remove("hidden"); document.body.style.overflow = "hidden";
     await preloadImgs(); renderStatic(); draw();
   }
@@ -1332,18 +1467,25 @@ const ReelEngine = (() => {
 
   // Switch collage mode without touching item layers (links stay attached to the items).
   $("modeRow").querySelectorAll(".chip").forEach((c) => c.onclick = () => {
-    const m = c.dataset.mode; if (m === ed.layout.mode) return;
+    const m = c.dataset.mode;
+    if (m === ed.layout.mode) { if (m !== "clothing" && !ed.layout.layers.some((l) => l.kind === "person")) pickPersonSheet(); return; }   // already in this mode but no person placed yet (picker was cancelled or hidden) → offer the picker again
     ed.layout.mode = m;
     if (m === "clothing") { ed.layout.layers = ed.layout.layers.filter((l) => l.kind !== "person"); applyPreset(ed.layout, "grid"); pushHistory(); renderStatic(); draw(); }
     else { renderStatic(); pickPersonSheet(); }
   });
   function pickPersonSheet() {
     const wantModel = ed.layout.mode === "model";
+    // Generated photos are labelled by what they wear (and "replaced" for Replace One Item versions) so versions can be told apart.
+    const genLabel = (g) => `${g.kind === "replace" ? "Replaced: " : ""}${garment(g.garment_id)?.name || state.outfits.find((o) => o.id === g.outfit_id)?.name || "Try-on result"} · ${new Date(g.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    const tile = (e) => `<button class="tile" data-k="${e.kind}" data-id="${e.row.id}"><img data-path="${esc(e.row.cutout_path || e.row.thumb_path || e.row.path)}" alt="">${e.row.cutout_path ? '<span class="badge">cutout</span>' : ""}<span class="cap">${esc(e.l)}</span></button>`;
+    // Model mode: the shared preset library and the user's own AI models are separate groups. "Me" mode never shows presets.
+    const presets = wantModel ? state.models.filter((m) => m.kind === "default").map((m) => ({ kind: "model", row: m, l: m.name })) : [];
     const list = wantModel
-      ? [...state.models.map((m) => ({ kind: "model", row: m, l: m.name })), ...state.generations.map((g) => ({ kind: "generation", row: g, l: "Try-on result" }))]
-      : [...state.selfies.map((s) => ({ kind: "selfie", row: s, l: s.label || "My photo" })), ...state.generations.map((g) => ({ kind: "generation", row: g, l: "Try-on result" }))];
+      ? [...state.models.filter((m) => m.kind !== "default").map((m) => ({ kind: "model", row: m, l: m.name })), ...state.generations.map((g) => ({ kind: "generation", row: g, l: genLabel(g) }))]
+      : [...state.selfies.map((s) => ({ kind: "selfie", row: s, l: s.label || "My photo" })), ...state.generations.map((g) => ({ kind: "generation", row: g, l: genLabel(g) }))];
     openSheet(`<h3>${wantModel ? "Pick the model" : "Pick a photo of you"}</h3><p class="hint">Cutouts (no background) look best in a collage. Pick one, then make a cutout if it doesn't have one yet (${cost("bgremove")} credit).</p>
-      <div class="grid">${list.map((e) => `<button class="tile" data-k="${e.kind}" data-id="${e.row.id}"><img data-path="${esc(e.row.cutout_path || e.row.thumb_path || e.row.path)}" alt="">${e.row.cutout_path ? '<span class="badge">cutout</span>' : ""}<span class="cap">${esc(e.l)}</span></button>`).join("") || '<div class="empty">Nothing here yet — generate a try-on or a model first.</div>'}</div>
+      ${wantModel ? `<label>Preset models</label><div class="grid" style="margin-bottom:12px">${presets.map(tile).join("") || '<div class="empty">No preset models yet.</div>'}</div><label>My AI models &amp; photos</label>` : ""}
+      <div class="grid">${list.map(tile).join("") || '<div class="empty">Nothing here yet — generate a try-on or a model first.</div>'}</div>
       <div class="stack" style="margin-top:10px"><button class="btn secondary" id="ppCancel">Keep clothing only</button><div id="ppMsg" class="msg"></div></div>`);
     $("ppCancel").onclick = () => { closeSheet(); if (!ed.layout.layers.some((l) => l.kind === "person")) { ed.layout.mode = "clothing"; renderStatic(); } };
     $("sheetBody").querySelectorAll(".tile").forEach((t) => t.onclick = async () => {
@@ -1445,7 +1587,7 @@ const ReelEngine = (() => {
     if (!l) { t.innerHTML = `<span class="kv" style="padding:8px 2px">Tap a layer to move it · drag · pinch to resize & rotate</span>`; return; }
     const common = `<button class="btn secondary small" data-a="smaller">− Size</button><button class="btn secondary small" data-a="bigger">+ Size</button>
       <button class="btn secondary small" data-a="rotl">⟲ 15°</button><button class="btn secondary small" data-a="rotr">⟳ 15°</button><button class="btn secondary small" data-a="straight">Straighten</button>
-      <button class="btn secondary small" data-a="front">Front</button><button class="btn secondary small" data-a="back">Back</button>${l.kind !== "person" ? '<button class="btn secondary small" data-a="dup">Duplicate</button>' : ""}`;
+      <button class="btn secondary small" data-a="front">Front</button><button class="btn secondary small" data-a="back">Back</button>${l.kind !== "person" ? '<button class="btn secondary small" data-a="dup">Duplicate</button>' : ""}${l.kind === "item" ? '<button class="btn secondary small" data-a="swap">Swap item</button>' : ""}`;
     const text = l.kind === "text" ? `<button class="btn secondary small" data-a="edit">Edit text</button><button class="btn secondary small" data-a="font">${l.font === "serif" ? "Sans" : "Serif"}</button>
       <label class="btn secondary small" style="margin:0">Color<input type="color" id="txtColor" value="${l.color}" style="width:22px;height:22px;border:0;background:none;padding:0"></label>` : "";
     t.innerHTML = common + text + `<button class="btn danger small" data-a="remove">Remove</button>`;
@@ -1464,8 +1606,19 @@ const ReelEngine = (() => {
       case "remove": L.splice(i, 1); ed.sel = null; if (!L.some((x) => x.kind === "person")) ed.layout.mode = "clothing"; renderStatic(); break;
       case "edit": { const t = prompt("Text", l.t); if (t != null && t !== "") l.t = t; break; }
       case "font": l.font = l.font === "serif" ? "sans" : "serif"; break;
+      case "swap": swapItemSheet(i); return;
     }
     pushHistory(); draw();
+  }
+  // Replace the clothing image of one layer, keeping its position, size and rotation (links follow the new item).
+  function swapItemSheet(i) {
+    const l = ed.layout.layers[i]; if (!l || l.kind !== "item") return;
+    const cur = garment(l.g), others = ownGarments().filter((g) => g.id !== l.g);
+    openSheet(`<h3>Swap item</h3><p class="hint">Replacing “${esc(cur?.name || "item")}” in this spot. Position and size stay the same.</p>
+      <div class="grid">${others.map((g) => `<button class="tile contain" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">No other clothing to swap in.</div>'}</div>`);
+    $("sheetBody").querySelectorAll(".tile").forEach((t) => t.onclick = async () => {
+      l.g = t.dataset.id; ed.sel = i; await preloadImgs(); pushHistory(); closeSheet(); renderStatic(); draw();
+    });
   }
   async function renderLayout(layout, W) {
     const H = Math.round(W * ratio(layout.size)), c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d");
@@ -1492,14 +1645,25 @@ const ReelEngine = (() => {
     try {
       const name = $("edName").value.trim() || "Untitled collage";
       const preview = await renderLayout(ed.layout, 540); const p = `${state.uid}/collages/${ed.c.id}.jpg`; await upload(p, preview);
-      const { error } = await sb.from("collages").update({ name, layout: ed.layout, preview_path: p, updated_at: new Date().toISOString() }).eq("id", ed.c.id);
+      const row = { name, layout: ed.layout, preview_path: p, updated_at: new Date().toISOString() };
+      const { error } = ed.c._draft
+        ? await sb.from("collages").upsert({ id: ed.c.id, outfit_id: ed.c.outfit_id || null, ...row })   // first Save creates the row; fixed id + upsert make a retry or double tap idempotent
+        : await sb.from("collages").update(row).eq("id", ed.c.id);
       if (error) throw new Error(error.message);
+      if (ed.c._draft) ed.c = { ...ed.c, ...row, _draft: false };
       ed.dirty = false; note("edMsg", "Saved.");
     } catch (e) { note("edMsg", e.message, true); }
     $("edSave").disabled = false;
   };
   $("edExport").onclick = async () => { note("edMsg", "Rendering…"); try { const blob = await renderLayout(ed.layout, 2160); await saveToPhotos(blob, `${($("edName").value || "collage").replace(/\W+/g, "-")}.jpg`); note("edMsg", ""); } catch (e) { note("edMsg", e.message, true); } };
-  $("edDelete").onclick = async () => { if (!confirm("Delete this collage?")) return; const sp = shopOf(ed.c.id); if (sp) await unpublishShop(sp); await removeFiles([ed.c.preview_path]); await sb.from("collages").delete().eq("id", ed.c.id); ed.dirty = false; closeEditor(); };
+  $("edDelete").onclick = async () => {
+    if (ed.c._draft) { if (!confirm("Discard this unsaved collage?")) return; ed.dirty = false; closeEditor(); return; }   // nothing in the database yet
+    if (shopOf(ed.c.id)?.published) { note("edMsg", "This collage has a live Shop page. Delete never changes published pages — unpublish it from Share / Publish first if you want to delete the collage.", true); return; }
+    if (!confirm("Delete this collage?\n\nOnly the collage and its preview image will be removed. Clothing, links, photos, models, outfits, reels and Facebook posts stay.\n\nThis can't be undone.")) return;
+    const { error } = await sb.from("collages").delete().eq("id", ed.c.id).eq("user_id", state.uid);
+    if (error) { note("edMsg", "Delete failed: " + error.message + " Nothing was changed.", true); return; }
+    await removeFiles([ed.c.preview_path]); ed.dirty = false; closeEditor();
+  };
   window.addEventListener("resize", () => { if (ed.c) draw(); });
 
   // ================================================================== CAPTIONS (free, from your item metadata)
@@ -1554,7 +1718,7 @@ const ReelEngine = (() => {
     await loadAll();
   }
   async function copyText(t, msgId) { try { await navigator.clipboard.writeText(t); note(msgId, "Copied."); } catch { note(msgId, "Copy failed — select the text and copy manually.", true); } }
-  $("edShare").onclick = async () => { if (ed.dirty) { if (!confirm("Save the collage first?")) return; await $("edSave").onclick(); } shareSheet(); };
+  $("edShare").onclick = async () => { if (ed.c._draft || ed.dirty) { if (!confirm(ed.c._draft ? "Save the collage first? Sharing and publishing need a saved collage." : "Save the collage first?")) return; await $("edSave").onclick(); if (ed.c._draft || ed.dirty) return; } shareSheet(); };
   function shareSheet() {
     const ctx = captionCtx(); let platform = "instagram", tone = "casual"; const sp = shopOf(ed.c.id);
     const missing = ctx.items.filter((g) => !g.affiliate_url).length;
