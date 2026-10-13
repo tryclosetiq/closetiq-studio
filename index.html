@@ -30,6 +30,7 @@
   h2{font:600 24px/1.15 Fraunces,serif;margin:4px 0 12px;text-wrap:balance}
   h3{font:600 17px/1.2 "Inter Tight",sans-serif;margin:14px 0 8px}
   p.hint{color:var(--muted);font-size:14px;margin:0 0 12px}
+  #fitRow{display:flex;gap:8px;align-items:flex-start;margin:8px 0 0} #fitRow.hidden{display:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
   label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;letter-spacing:.03em;text-transform:uppercase}
   label.inline{display:flex;gap:8px;align-items:center;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0}
@@ -156,7 +157,8 @@
       <div><label>Model</label><div class="strip" id="pickSelfie"></div></div>
       <div><label>Clothing</label><div class="strip" id="pickGarment"></div></div>
       <div id="srcRow" class="hidden"><label>Clothing image</label>
-        <div class="chips"><button class="chip on" data-src="path">Product photo</button><button class="chip" data-src="cutout">Clean cutout</button></div></div>
+        <div class="chips"><button class="chip on" data-src="path">Product photo</button><button class="chip" data-src="cutout">Clean cutout</button></div>
+        <p class="hint" style="margin:6px 0 0">The product photo keeps the real fit and drape. The cutout is for collages; it tends to come out fitted in try-on.</p></div>
       <div><label for="preset">Quality</label><select id="preset"></select></div>
       <div id="v16opts" class="row hidden">
         <div><label for="category">Garment type</label>
@@ -165,7 +167,8 @@
           <select id="gpt"><option value="auto">Auto</option><option value="flat-lay">Flat-lay / product</option><option value="model">On a model</option></select></div>
       </div>
       <div id="maxopts"><label for="prompt">Instructions (optional)</label>
-        <textarea id="prompt" placeholder="e.g. keep the phone, mirror and room exactly as in the photo"></textarea></div>
+        <textarea id="prompt" placeholder="e.g. keep the phone, mirror and room exactly as in the photo"></textarea>
+        <p id="fitRow" class="hint hidden"><input type="checkbox" id="fitAuto" checked style="margin-top:3px"><span id="fitNote"></span></p></div>
       <button class="btn" id="generate" disabled>Generate try-on</button>
       <button class="btn secondary" id="p2m" disabled>No model? Generate a model wearing it (Product to Model)</button>
       <div id="runMsg" class="msg"></div>
@@ -584,6 +587,36 @@ const ReelEngine = (() => {
   }
   function renderAll() { renderModels(); renderGarments(); renderPickers(); renderPhotos(); renderOutfits(); renderCollages(); }
   const garment = (id) => state.garments.find((g) => g.id === id);
+
+  // ------------------------------------------------------------------ fit hints
+  // FASHN has no fit/silhouette parameter: the prompt is the only lever (proven in the Oct 2026 fit test — product photo +
+  // a fit sentence kept an oversized sweatshirt oversized; the flat cutout made it fitted). Hints come from the item's
+  // own name + notes, so "Black oversized crewneck" is respected automatically. The owner sees the hint before spending.
+  const FIT_RULES = [
+    [/\b(oversized?|baggy|boxy|slouchy|loose(-| )?fit(ting)?|loose)\b/, "oversized and loose: dropped shoulders, roomy wide sleeves, boxy body with extra fabric, full long hem — baggy, not fitted"],
+    [/\b(relaxed|boyfriend|easy[- ]fit)\b/, "relaxed, easy fit with room through the body — not tight"],
+    [/\b(fitted|slim(-| )?fit|bodycon|body[- ]?hugging|form[- ]?fitting|skinny|tight|snug)\b/, "fitted and close to the body"],
+    [/\b(wide(-| )?leg|palazzo|flared?|bootcut|bell[- ]bottoms?)\b/, "wide, loose legs falling from the hip to the floor"],
+    [/\bstraight(-| )?leg\b/, "straight legs, not tapered"],
+    [/\b(cropped?|crop[- ]top)\b/, "cropped: a short hem ending above the natural waist for a top, or above the ankle for pants"],
+    [/\b(longline|tunic|elongated)\b/, "longline, hem falling well below the hip"],
+    [/\bhigh[- ]?(waist|waisted|rise)\b/, "high-waisted, sitting at the natural waist"],
+    [/\bmaxi\b/, "maxi, floor-length", /skirt|dress/],
+    [/\bmidi\b/, "midi, mid-calf length", /skirt|dress/],
+    [/\bmini\b/, "mini, short above the knee", /skirt|dress/],
+  ];
+  function fitParts(g) {
+    if (!g) return [];
+    const text = `${g.name || ""} ${g.notes || ""}`.toLowerCase();
+    return FIT_RULES.filter(([re, , need]) => re.test(text) && (!need || need.test(text))).map(([, p]) => p);
+  }
+  function fitHint(g) {
+    const parts = fitParts(g);
+    return parts.length ? `Fit of the ${g.name}: ${parts.join("; ")}. Keep this exact silhouette from the product photo.` : "";
+  }
+  const fitLabel = (g) => { const p = fitParts(g); return p.length ? `Fit kept automatically (from the item's name/notes): ${p.join("; ")}.` : ""; };
+  const withFit = (...parts) => parts.filter(Boolean).join(" ").slice(0, 500);   // server caps prompts at 500 chars
+
   // Any "person" image: selfie | model | generation
   function person(kind, id) {
     const row = kind === "selfie" ? state.selfies.find((x) => x.id === id) : kind === "model" ? state.models.find((x) => x.id === id) : state.generations.find((x) => x.id === id);
@@ -914,7 +947,7 @@ const ReelEngine = (() => {
     $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("gImg").src = await url(x[c.dataset.v]); });
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
     $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
-    $("gTry").onclick = () => { state.sel.garment = x.id; state.sel.src = x.cutout_path ? "cutout" : "path"; closeSheet(); renderPickers(); showTab("tryon"); };
+    $("gTry").onclick = () => { state.sel.garment = x.id; state.sel.src = "path"; closeSheet(); renderPickers(); showTab("tryon"); };
     $("gExtract").onclick = () => spendAction("/extract", cost("extract"), "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
     $("gBg").onclick = () => spendAction("/bgremove", cost("bgremove"), "Remove the background from the extracted clothing (transparent PNG).", x);
     $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await removeFiles([x.path, x.thumb_path, x.cutout_path, x.source_path]); await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
@@ -960,9 +993,10 @@ const ReelEngine = (() => {
     ps.innerHTML = people.map((e) => `<button class="tile ${cur === e.k + e.id ? "sel" : ""}" data-k="${e.k}" data-id="${e.id}"><img data-path="${esc(e.p)}" alt=""><span class="cap">${esc(e.l)}</span></button>`).join("") || '<div class="empty">Add a photo or generate a model first</div>';
     pg.innerHTML = ownGarments().map((g) => `<button class="tile contain ${state.sel.garment === g.id ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first (Amazon-API products can\'t be used for try-on)</div>';
     ps.querySelectorAll(".tile").forEach((t) => t.onclick = () => { if (t.dataset.k === "m") { state.sel.model = t.dataset.id; state.sel.selfie = null; } else { state.sel.selfie = t.dataset.id; state.sel.model = null; } renderPickers(); });
-    pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => { const g = garment(t.dataset.id); state.sel.garment = g.id; state.sel.src = g.cutout_path ? "cutout" : "path"; renderPickers(); });
+    pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => { const g = garment(t.dataset.id); state.sel.garment = g.id; state.sel.src = "path"; renderPickers(); });   // product photo by default: keeps the real fit
     const g = garment(state.sel.garment);
     $("srcRow").classList.toggle("hidden", !(g && g.cutout_path));
+    const fl = fitLabel(g); $("fitRow").classList.toggle("hidden", !fl); $("fitNote").textContent = fl;
     $("srcRow").querySelectorAll(".chip").forEach((c) => { c.classList.toggle("on", c.dataset.src === state.sel.src); c.onclick = () => { state.sel.src = c.dataset.src; renderPickers(); }; });
     $("generate").disabled = !(selectedPerson() && g); $("p2m").disabled = !g;
     fillImgs(ps); fillImgs(pg);
@@ -981,7 +1015,7 @@ const ReelEngine = (() => {
     try {
       const r = await runAndWait("/run", { preset: $("preset").value, selfie_path: who.path,
         garment_path: state.sel.src === "cutout" && g.cutout_path ? g.cutout_path : g.path,
-        category: $("category").value, garment_photo_type: $("gpt").value, prompt: $("prompt").value.trim() || undefined,
+        category: $("category").value, garment_photo_type: $("gpt").value, prompt: withFit($("prompt").value.trim(), $("fitAuto").checked ? fitHint(g) : "") || undefined,
         meta: { kind: "tryon", selfie_id: who.kind === "selfie" ? who.id : null, model_id: who.kind === "model" ? who.id : null, garment_id: g.id } }, (t) => note("runMsg", t));
       showResult(r, g); note("runMsg", `Done — ${r.credits} credit(s) used. Saved to My Photos.`); loadAll();
     } catch (e) { note("runMsg", e.message, true); }
@@ -1012,27 +1046,68 @@ const ReelEngine = (() => {
   // ================================================================== PHOTOS
   function renderPhotos() {
     const g = $("genGrid");
-    g.innerHTML = state.generations.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.path)}" loading="lazy" alt="">${x.cutout_path ? '<span class="badge">cutout</span>' : ""}</button>`).join("") || '<div class="empty">Nothing generated yet.</div>';
+    g.innerHTML = state.generations.map((x) => `<button class="tile" data-id="${x.id}"><img data-path="${esc(x.path)}" loading="lazy" alt="">${x.parent_id ? '<span class="badge">replaced</span>' : x.cutout_path ? '<span class="badge">cutout</span>' : ""}</button>`).join("") || '<div class="empty">Nothing generated yet.</div>';
     g.querySelectorAll(".tile").forEach((t) => t.onclick = () => photoSheet(t.dataset.id));
     fillImgs(g);
   }
   function photoSheet(id) {
     const x = state.generations.find((p) => p.id === id); if (!x) return;
     const g = garment(x.garment_id), o = state.outfits.find((q) => q.id === x.outfit_id);
-    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Photo</button>${x.cutout_path ? '<button class="chip" data-v="cutout_path">Cutout</button>' : ""}</div>
+    const parent = x.parent_id ? state.generations.find((p) => p.id === x.parent_id) : null;   // Replace One Item keeps the original; this photo was made from it
+    const kids = state.generations.filter((p) => p.parent_id === x.id);
+    const versions = parent || kids.length ? [parent || x, ...(parent ? state.generations.filter((p) => p.parent_id === parent.id) : kids)] : [];
+    const fromCredits = Math.min(...Object.entries(state.me.presets).filter(([k]) => k.startsWith("max")).map(([, v]) => v.credits));
+    openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Photo</button>${parent ? `<button class="chip" data-p="${esc(parent.path)}">Original (before replace)</button>` : ""}${x.cutout_path ? '<button class="chip" data-v="cutout_path">Cutout</button>' : ""}</div>
       <img class="big" id="phImg" data-path="${esc(x.path)}" alt="">
-      <p class="kv" style="margin:8px 0">${esc(new Date(x.created_at).toLocaleString())} · ${esc(x.preset || x.kind)} · ${x.credits} credit(s)${g ? " · " + esc(g.name) : ""}${o ? " · " + esc(o.name) : ""}</p>
+      <p class="kv" style="margin:8px 0">${esc(new Date(x.created_at).toLocaleString())} · ${esc(x.preset || x.kind)} · ${x.credits} credit(s)${x.kind === "replace" ? " · replaced item" : ""}${g ? " · " + esc(g.name) : ""}${o ? " · " + esc(o.name) : ""}</p>
+      ${versions.length ? `<div style="margin-bottom:10px"><label>Versions (original first)</label><div class="strip" id="pVers">${versions.map((v) => `<button class="tile ${v.id === x.id ? "sel" : ""}" data-id="${v.id}"><img data-path="${esc(v.path)}" alt=""><span class="cap">${v.parent_id ? esc(garment(v.garment_id)?.name || "replaced") : "original"}</span></button>`).join("")}</div></div>` : ""}
       <div class="stack"><button class="btn" id="pSave">Save to Photos</button>
+        <button class="btn secondary" id="pReplace">Replace one item · from ${fromCredits} credit</button>
         <button class="btn secondary" id="pCut">${x.cutout_path ? "Redo person cutout" : "Person cutout for collages"} · ${cost("bgremove")} credit</button>
         <button class="btn secondary" id="pReuse">Use as model for another try-on</button>
         ${o ? '<button class="btn secondary" id="pHero">Set as outfit cover</button>' : ""}
         <button class="btn danger" id="pDel">Delete</button><div id="pMsg" class="msg"></div></div>`);
-    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("phImg").src = await url(x[c.dataset.v]); });
+    $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("phImg").src = await url(c.dataset.p || x[c.dataset.v]); });
+    if (versions.length) $("pVers").querySelectorAll(".tile").forEach((t) => t.onclick = () => { if (t.dataset.id !== x.id) photoSheet(t.dataset.id); });
     $("pSave").onclick = async () => saveToPhotos(await blobOf(x.path), "closetiq-studio.jpg");
+    $("pReplace").onclick = () => replaceSheet(x);
     $("pCut").onclick = async () => { if (!confirmSpend(cost("bgremove"), "Remove the background around the person.")) return; try { note("pMsg", "Cutting out…"); await runAndWait("/bgremove", { target: "generation", id: x.id }, (t) => note("pMsg", t)); await loadAll(); photoSheet(id); note("pMsg", "Cutout ready."); } catch (e) { note("pMsg", e.message, true); } };
     $("pReuse").onclick = () => { state.sel.model = "gen:" + x.id; state.sel.selfie = null; closeSheet(); renderPickers(); showTab("tryon"); };
     if (o) $("pHero").onclick = async () => { await sb.from("outfits").update({ hero_generation_id: x.id }).eq("id", o.id); await loadAll(); closeSheet(); };
-    $("pDel").onclick = async () => { if (!confirm("Delete this photo?")) return; await removeFiles([x.path, x.cutout_path]); await sb.from("generations").delete().eq("id", x.id); closeSheet(); await loadAll(); };
+    $("pDel").onclick = async () => { if (!confirm(kids.length ? `Delete this photo? Its ${kids.length} replaced version${kids.length > 1 ? "s" : ""} will stay.` : "Delete this photo?")) return; await removeFiles([x.path, x.cutout_path]); await sb.from("generations").delete().eq("id", x.id); closeSheet(); await loadAll(); };
+  }
+  // Replace One Item: re-run Try-On Max with the finished photo as the model and one product photo as the garment.
+  // Proven in the fit test (test E): the rest of the outfit, pose and room survive. The original photo is never changed;
+  // the result is a new photo linked to it (parent_id), so the two can be compared from either one.
+  function replaceSheet(x) {
+    const p = state.me.presets, own = ownGarments(); let gid = null;
+    openSheet(`<h3>Replace one item</h3>
+      <p class="hint">Pick the clothing to put on this photo. The rest of the outfit, pose and background stay as they are. Your original photo is kept; the result is saved as a new photo you can compare with it.</p><div class="stack">
+      <div><label>This photo</label><div class="strip"><div class="tile"><img data-path="${esc(x.path)}" alt=""></div></div></div>
+      <div><label>New item (product photo is used, so the fit is kept)</label><div class="strip" id="rpPick">${own.map((g) => `<button class="tile contain" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first (Amazon-API products can\'t be used for try-on).</div>'}</div></div>
+      <div><label for="rpPreset">Quality</label><select id="rpPreset">${Object.entries(p).filter(([k]) => k.startsWith("max")).map(([k, v]) => `<option value="${k}">${esc(v.label)} · ${v.credits} credit${v.credits > 1 ? "s" : ""}</option>`).join("")}</select></div>
+      <div><label for="rpPrompt">Instructions (optional)</label><textarea id="rpPrompt" placeholder="e.g. tuck it in; keep the bag and shoes exactly as they are"></textarea><p class="hint" id="rpFit" style="margin:6px 0 0"></p></div>
+      <p class="hint" id="rpCost" style="font-weight:600"></p>
+      <button class="btn" id="rpGo" disabled>Pick an item above</button><div id="rpMsg" class="msg"></div></div>`);
+    const refresh = () => {
+      const c = p[$("rpPreset").value].credits, g = garment(gid);
+      $("rpCost").textContent = `Cost: ${c} FASHN credit${c > 1 ? "s" : ""} · today ${state.me.used_today}/${state.me.daily_cap} used.`;
+      $("rpFit").textContent = g ? fitLabel(g) : "";
+      $("rpGo").disabled = !g; $("rpGo").textContent = g ? `Replace item · ${c} credit${c > 1 ? "s" : ""}` : "Pick an item above";
+    };
+    $("rpPick").querySelectorAll(".tile").forEach((t) => t.onclick = () => { gid = t.dataset.id; $("rpPick").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); refresh(); });
+    $("rpPreset").onchange = refresh; refresh();
+    $("rpGo").onclick = async () => {
+      const g = garment(gid), preset = $("rpPreset").value, c = p[preset].credits;
+      if (!confirmSpend(c, `Replace one item with "${g.name}" on this photo (${p[preset].label}). The original photo is kept.`)) return;
+      $("rpGo").disabled = true;
+      try {
+        const r = await runAndWait("/run", { preset, garment_path: g.path, prompt: withFit($("rpPrompt").value.trim(), fitHint(g)) || undefined,
+          meta: { kind: "replace", parent_generation_id: x.id, garment_id: g.id } }, (t) => note("rpMsg", t));
+        await loadAll(); photoSheet(r.generation_id); note("pMsg", `Done — ${r.credits} credit(s). Saved as a new photo; tap “Original” above to compare.`);
+      } catch (e) { note("rpMsg", e.message, true); $("rpGo").disabled = false; }
+    };
+    fillImgs($("sheetBody"));
   }
 
   // ================================================================== OUTFITS
@@ -1128,13 +1203,13 @@ const ReelEngine = (() => {
         if (method === "single") {
           note("otMsg", "Building collage…");
           const blob = await renderLayout({ ...makeLayout(items.map((g) => g.id), "grid"), bg: "#ffffff" }, 1400);
-          const r = await runAndWait("/run", { preset, selfie_path: who.path, garment_image: await toDataUrl(blob), prompt: "wear all of these items together", meta: { ...meta, kind: "outfit_single" } }, (t) => note("otMsg", t));
+          const r = await runAndWait("/run", { preset, selfie_path: who.path, garment_image: await toDataUrl(blob), prompt: withFit("wear all of these items together", ...items.map(fitHint)), meta: { ...meta, kind: "outfit_single" } }, (t) => note("otMsg", t));
           $("otSteps").innerHTML = `<div class="tile"><img data-path="${esc(r.path)}" alt=""></div>`; fillImgs($("otSteps")); note("otMsg", `Done — ${r.credits} credits. Saved to My Photos.`);
         } else {
           let prev = who.path, used = 0;
           for (let i = 0; i < items.length; i++) {
             const g = items[i]; note("otMsg", `Step ${i + 1}/${items.length}: ${g.name}…`);
-            const r = await runAndWait("/run", { preset, selfie_path: prev, garment_path: g.cutout_path || g.path, meta: { ...meta, kind: "outfit_step", garment_id: g.id, step: i + 1 } }, (t) => note("otMsg", `Step ${i + 1}/${items.length}: ${t}`));
+            const r = await runAndWait("/run", { preset, selfie_path: prev, garment_path: g.path, prompt: fitHint(g) || undefined, meta: { ...meta, kind: "outfit_step", garment_id: g.id, step: i + 1 } }, (t) => note("otMsg", `Step ${i + 1}/${items.length}: ${t}`));   // product photo keeps the real fit
             prev = r.path; used += r.credits;
             $("otSteps").insertAdjacentHTML("beforeend", `<div class="tile"><img data-path="${esc(r.path)}" alt=""><span class="cap">${i + 1}. ${esc(g.name)}</span></div>`); fillImgs($("otSteps"));
             if (i < items.length - 1 && !confirm(`Step ${i + 1} done. Continue with "${items[i + 1].name}" (${c} more credits)?`)) break;
