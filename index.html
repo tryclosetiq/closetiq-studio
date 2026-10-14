@@ -1291,8 +1291,10 @@ const ReelEngine = (() => {
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
   };
   const itemLabel = (g) => shortName(g?.name) || (g?.brand || "").trim() || (g?.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : "Item");
-  // Which items belong on a public shop page: a real saved name (no category placeholders) and a picture.
-  const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && hasImage);
+  // Which items belong on a public shop page. A saved name is required (blank names stay off). A publishable
+  // picture — a cutout, or the original when public_ok is set — is enough on its own, including "Link coming soon".
+  // A name plus an Amazon link is enough too: the original photo is not required, and it is never published without permission.
+  const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && (hasImage || (g.affiliate_url || "").trim()));
   const linkedItems = (items) => (items || []).filter((g) => g && g.affiliate_url);
   const missingInfo = (items) => (items || []).filter((g) => g && (!(g.name || "").trim() || !g.affiliate_url));
   // Links list for captions: ONLY items that have a link. Unlinked or unnamed items are never printed as ": (no link)".
@@ -1971,6 +1973,17 @@ const ReelEngine = (() => {
   const shopOfOutfit = (outfitId) => outfitId ? (state.shops.find((p) => p.outfit_id === outfitId) || state.shops.find((p) => { const c = state.collages.find((x) => x.id === p.collage_id); return c && c.outfit_id === outfitId; }) || null) : null;
   const shopFor = (c) => (c.outfit_id && shopOfOutfit(c.outfit_id)) || shopOf(c.id) || null;
   const shopLink = (sp) => SHOP_BASE + sp.slug;
+  // Owner-uploaded shop photo lives beside collage.jpg. The filename is the flag — no extra column.
+  const isCustomHeroPath = (p) => /\/custom\.jpg$/i.test(String(p || ""));
+  // Decide the shop page's main image. "custom" uploads or keeps custom.jpg; "collage" (or a page that never had one)
+  // uses the auto-rendered collage. Republish with no hero option keeps a custom image already in use.
+  function resolveShopHero(prevPath, opts) {
+    const keepCustom = opts.hero === "custom" || (opts.hero !== "collage" && isCustomHeroPath(prevPath));
+    if (!keepCustom) return { custom: false, upload: false, dropCustom: isCustomHeroPath(prevPath) };
+    if (opts.heroBlob) return { custom: true, upload: true, dropCustom: false };
+    if (isCustomHeroPath(prevPath)) return { custom: true, upload: false, dropCustom: false };
+    return { error: "Choose an image to use as the shop page photo, or switch to Auto collage." };
+  }
   async function uploadPublic(path, blob) { const { error } = await sb.storage.from("shop").upload(path, blob, { contentType: blob.type, upsert: true }); if (error) throw new Error(error.message); }
   // Tappable areas on the published collage image: one rectangle per clothing item, in 0–1 collage coordinates.
   async function layoutHotspots(layout) {
@@ -1981,22 +1994,33 @@ const ReelEngine = (() => {
     }
     return out;
   }
-  // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = collage image + item images in the
-  // public bucket + item list (name, link, hotspot). Unlinked items are included and shown as "Link coming soon".
+  // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = main image + item images we are
+  // allowed to show + item list (name, link, hotspot). Unlinked items with a picture are included as "Link coming soon".
+  // Named items with a link are included even with no publishable photo. A custom main image (custom.jpg) replaces the
+  // auto collage; hotspots are omitted then because they only match the collage layout.
   async function publishShopFor(c, layout, opts = {}) {
     const itemsIn = [...new Set((layout.layers || []).filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
     const sp = shopFor(c);
     const slug = sp?.slug || Math.random().toString(36).slice(2, 12), base = `${state.uid}/${slug}`;
-    await uploadPublic(`${base}/collage.jpg`, await renderLayout(layout, 1080));
-    const spots = await layoutHotspots(layout);
-    // Public list: only real products — a saved name (no "Tops"/"Accessory" placeholders) and a picture. Items without a
-    // name or picture are left off the page (they stay in the Studio untouched); a named item without a link shows as
-    // "Link coming soon".
+    const prev = sp || {};
+    const autoPath = `${base}/collage.jpg`, customPath = `${base}/custom.jpg`;
+    await uploadPublic(autoPath, await renderLayout(layout, 1080));   // homepage cover still falls back to this file
+    const heroPick = resolveShopHero(prev.collage_public_path, opts);
+    if (heroPick.error) throw new Error(heroPick.error);
+    let collage_public_path = autoPath;
+    if (heroPick.custom) {
+      if (heroPick.upload) { const blob = await shrink(opts.heroBlob, 1080, "image/jpeg", 0.9); if (!blob) throw new Error("That image could not be read. Try a JPG or PNG."); await uploadPublic(customPath, blob); }
+      collage_public_path = customPath;
+    } else if (heroPick.dropCustom) await sb.storage.from("shop").remove([prev.collage_public_path]);
+    const spots = heroPick.custom ? {} : await layoutHotspots(layout);   // tap areas only match the auto collage
+    // Public list: a saved name. Blank names are left off (they stay in the Studio). A cutout, or an original the owner
+    // marked public_ok, is copied into the shop bucket. Otherwise a named item with an Amazon link is listed with no
+    // picture — the original photo is never uploaded. Category placeholders are hidden by the shop page, as before.
     const items = [];
     for (const g of itemsIn) {
       if (!(g.name || "").trim()) continue;
       const common = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: spots[g.id] || null };
-      if (isApi(g)) { if (!g.image_url) continue; items.push({ ...common, image_path: null, image_url: g.image_url, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
+      if (isApi(g)) { if (!shopEligible(g, !!g.image_url)) continue; items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
       let image_path = null;
       const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
       if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
@@ -2005,13 +2029,13 @@ const ReelEngine = (() => {
     }
     // Homepage cover: the outfit's AI photo (the photo set as outfit cover) by default, the collage when chosen or when
     // there is no photo. Always a plain copy of an existing image — publishing never generates anything or spends credits.
-    const prev = sp || {}; const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
+    const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
     const coverSource = opts.cover_source || prev.cover_source || "photo";
     const hero = o ? state.generations.find((g) => g.id === o.hero_generation_id) : null;
     let cover_public_path = `${base}/collage.jpg`;
     if (coverSource === "photo" && hero) { try { await uploadPublic(`${base}/cover.jpg`, await shrink(await blobOf(hero.path), 1080, "image/jpeg", 0.88)); cover_public_path = `${base}/cover.jpg`; } catch (e) { console.warn("cover copy failed, using collage", e); } }
     const row = { collage_id: c.id, outfit_id: c.outfit_id || null, slug, title: opts.title || prev.title || c.name || "This outfit", caption: opts.caption !== undefined ? (opts.caption || null) : (prev.caption ?? null),
-      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString(),
+      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path, items, published: true, updated_at: new Date().toISOString(),
       listed: prev.listed ?? true, featured: prev.featured ?? false, sort_order: prev.sort_order ?? 0, category: opts.category !== undefined ? opts.category : (prev.category ?? null),
       cover_source: coverSource, cover_public_path, storefront_url: state.settings.amazon_storefront_url || null };
     const write = (r) => sp ? sb.from("shop_pages").update(r).eq("id", sp.id).eq("user_id", state.uid) : sb.from("shop_pages").insert(r);
@@ -2136,7 +2160,7 @@ const ReelEngine = (() => {
   $("storeView").addEventListener("click", () => openShopPreview(SHOP_HOME));
   $("storeCopy").addEventListener("click", () => copyText(SHOP_HOME, "storeMsg"));
   $("storeOpenTab").href = SHOP_HOME; $("storeUrl").textContent = SHOP_HOME;
-  async function publishShop(caption) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title }); }
+  async function publishShop(caption, extra = {}) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title, hero: extra.hero, heroBlob: extra.heroBlob || null }); }
   // Keep published pages in sync after a product edit: every live page whose collage contains the item is re-published.
   async function syncShopPagesForGarment(gid) {
     const done = new Set(); let n = 0;
@@ -2177,6 +2201,16 @@ const ReelEngine = (() => {
       <p class="kv">You can edit the caption above before copying or posting — press and hold to select, or tap Select all.</p>
       <hr style="border:0;border-top:1px solid var(--line)">
       <div class="kv">${sp?.published ? `Shop page is live: <a href="${esc(shopLink(sp))}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(shopLink(sp))}</a>` : "Shop page not published yet."}</div>
+      <div><label>Shop page photo</label>
+        <div class="chips" id="shHero"><button class="chip" data-hero="collage">Auto collage</button><button class="chip" data-hero="custom">Use my own image</button></div>
+        <div id="shHeroBox" class="stack hidden" style="margin-top:8px">
+          <img id="shHeroPrev" alt="Shop page photo preview" class="big" style="max-height:220px;object-fit:contain;background:#fff;display:none">
+          <button class="btn secondary" id="shHeroPick">Choose image</button>
+          <p class="kv" id="shHeroNote" style="margin:0"></p>
+        </div>
+        <input id="shHeroFile" type="file" accept="image/*" class="hidden">
+      </div>
+      <p class="kv">Items with a name and an Amazon link are listed even when their original photo is not published. Photos are only copied when the item has a cutout, or you have ticked permission on the item.</p>
       <div class="row"><button class="btn" id="shPublish">${sp?.published ? "Update shop page" : "Publish shop page"}</button>${sp?.published ? '<button class="btn secondary" id="shUnpub">Unpublish</button>' : ""}</div>
       ${sp?.published ? '<div class="row"><button class="btn secondary small" id="shCopyLink">Copy link</button><a class="btn secondary small" id="shOpen" target="_blank" rel="noopener">Open page</a></div>' : ""}
       <hr style="border:0;border-top:1px solid var(--line)">
@@ -2194,7 +2228,29 @@ const ReelEngine = (() => {
     $("capRegen").onclick = regen; regen();
     $("capCopy").onclick = () => copyText($("capText").value, "shMsg"); $("capSelect").onclick = () => selectAllText($("capText"));
     $("capLinks").onclick = () => copyText(linksText(ctx.title, "", ctx.items), "shMsg");
-    $("shPublish").onclick = async () => { $("shPublish").disabled = true; note("shMsg", "Publishing…"); try { const p = await publishShop($("capText").value); note("shMsg", "Live at " + shopLink(p)); shareSheet(); } catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; } };
+    let heroMode = isCustomHeroPath(sp?.collage_public_path) ? "custom" : "collage", heroFile = null, heroPreviewUrl = "";
+    const paintHero = () => {
+      $("shHero").querySelectorAll("[data-hero]").forEach((b) => b.classList.toggle("on", b.dataset.hero === heroMode));
+      $("shHeroBox").classList.toggle("hidden", heroMode !== "custom");
+      const prev = $("shHeroPrev");
+      if (heroPreviewUrl) { URL.revokeObjectURL(heroPreviewUrl); heroPreviewUrl = ""; }
+      const src = heroMode !== "custom" ? "" : heroFile ? (heroPreviewUrl = URL.createObjectURL(heroFile)) : (isCustomHeroPath(sp?.collage_public_path) ? pubUrl(sp.collage_public_path) + "?v=" + encodeURIComponent(sp.updated_at || "") : "");
+      prev.style.display = src ? "block" : "none"; if (src) prev.src = src;
+      $("shHeroPick").textContent = heroFile || isCustomHeroPath(sp?.collage_public_path) ? "Change image" : "Choose image";
+      $("shHeroNote").textContent = heroFile ? "This photo replaces the collage on the shop page. Product links stay in the list. Tap areas on the photo are off."
+        : isCustomHeroPath(sp?.collage_public_path) ? "Update keeps this photo. Choose a new file to replace it, or switch to Auto collage. Tap areas on the photo stay off."
+        : "Choose a photo to use instead of the collage. Every product link still appears in the list. Tap areas on the photo are off.";
+    };
+    $("shHero").onclick = (e) => { const b = e.target.closest("[data-hero]"); if (!b) return; heroMode = b.dataset.hero; paintHero(); };
+    $("shHeroPick").onclick = () => $("shHeroFile").click();
+    $("shHeroFile").onchange = () => { const f = $("shHeroFile").files && $("shHeroFile").files[0]; if (!f) return; heroFile = f; heroMode = "custom"; paintHero(); };
+    paintHero();
+    $("shPublish").onclick = async () => {
+      if (heroMode === "custom" && !heroFile && !isCustomHeroPath(sp?.collage_public_path)) { note("shMsg", "Choose an image first, or switch to Auto collage.", true); return; }
+      $("shPublish").disabled = true; note("shMsg", "Publishing…");
+      try { const p = await publishShop($("capText").value, { hero: heroMode, heroBlob: heroMode === "custom" ? heroFile : null }); note("shMsg", "Live at " + shopLink(p)); shareSheet(); }
+      catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; }
+    };
     if (sp?.published) {
       $("shUnpub").onclick = async () => { if (!confirm("Unpublish this shop page? The link will stop working.")) return; await unpublishShop(sp); shareSheet(); };
       $("shCopyLink").onclick = () => copyText(shopLink(sp), "shMsg"); $("shOpen").href = shopLink(sp); $("shOpen").onclick = (e) => { e.preventDefault(); openShopPreview(shopLink(sp)); };
