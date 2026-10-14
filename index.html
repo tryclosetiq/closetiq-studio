@@ -104,13 +104,21 @@
   .cropBox .h{position:absolute;width:34px;height:34px;right:-17px;bottom:-17px;border-radius:50%;background:var(--accent);border:3px solid #fff;touch-action:none}
   .cropBox .h.tl{left:-17px;top:-17px;right:auto;bottom:auto}
   .cropBox .lbl{position:absolute;left:50%;top:-26px;transform:translateX(-50%);font-size:11px;color:#fff;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:999px;white-space:nowrap}
-  /* ---- collage editor (full screen) ---- */
-  #editor{position:fixed;inset:0;z-index:30;background:var(--bg);overflow:auto;padding:calc(8px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
+  /* ---- collage editor (full screen) ----
+     The action bar is a flex sibling of the scroller, so the canvas can scroll fully above it
+     on mobile and desktop. A fixed bar inside the scroller sat on top of the picture. */
+  #editor{position:fixed;inset:0;z-index:30;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;padding:0}
+  #editor .ed-scroll{flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:calc(8px + env(safe-area-inset-top)) 12px 16px}
   .ed-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .ed-top input{flex:1;font:600 17px "Inter Tight",sans-serif;border:0;background:transparent;padding:6px 4px}
-  .stage{position:relative;width:100%;border-radius:12px;overflow:hidden;touch-action:none;background:#fff;border:1px solid var(--line);user-select:none;-webkit-user-select:none}
-  .layer{position:absolute;left:0;top:0;transform-origin:center center;touch-action:none;will-change:transform}
-  .layer img{width:100%;display:block;pointer-events:none;-webkit-user-drag:none;user-select:none}
+  /* overflow:clip + clip-path (not overflow:hidden + border-radius) so iOS paints transformed
+     layers. will-change:transform was promoting every layer and Mobile Safari drew an empty stage. */
+  .stage{position:relative;width:100%;border-radius:12px;overflow:clip;clip-path:inset(0 round 12px);touch-action:pan-y;background:#fff;border:1px solid var(--line);user-select:none;-webkit-user-select:none}
+  #editor.imported .stage{height:auto !important;touch-action:auto;background:var(--soft);overflow:hidden;clip-path:none}
+  #editor.imported .stage img.fixed{width:100%;height:100%;object-fit:contain;display:block}
+  #editor.imported :is(#modeRow,#selTools,#selPanel,#addTools,#edBg,#edPresets,#edUndo,#edRedo){display:none !important}
+  .layer{position:absolute;left:0;top:0;transform-origin:center center;touch-action:none}
+  .layer img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;-webkit-user-drag:none;user-select:none}
   .layer.text{white-space:pre;text-align:center;line-height:1.15;padding:2px 6px}
   .layer.sel{outline:2px solid var(--ring);outline-offset:3px;border-radius:4px}
   .guide{position:absolute;background:var(--accent);opacity:.7;pointer-events:none;display:none}
@@ -128,7 +136,8 @@
   .tools::-webkit-scrollbar{display:none}
   .tools .btn{flex:0 0 auto;white-space:nowrap}
   .ed-bar{position:fixed;left:0;right:0;bottom:0;z-index:31;display:flex;gap:8px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line)}
-  .ed-bar .btn{padding:11px 8px;font-size:14px}
+  #editor .ed-bar{position:relative;left:auto;right:auto;bottom:auto;flex:none;z-index:2}
+  .ed-bar .btn{padding:11px 8px;font-size:14px;min-width:0}
   details.ed summary{cursor:pointer;color:var(--muted);font-size:14px;padding:8px 0}
 </style>
 </head>
@@ -215,7 +224,7 @@
 
   <section id="tab-collages" class="hidden">
     <h2>Collages</h2>
-    <p class="hint">Clothing only, you + outfit, or an AI model + outfit. Tap one to edit.</p>
+    <p class="hint">Clothing only, you + outfit, an AI model + outfit, or a finished image you import. Tap one to edit.</p>
     <div class="row" style="margin-bottom:10px"><button class="btn secondary" id="fbQueueBtn">Facebook queue</button><button class="btn secondary" id="selCollages">Select</button></div>
     <div class="row hidden" id="colBar" style="margin-bottom:10px"><button class="btn danger small" id="colDelSel" disabled>Delete selected</button><span class="kv" id="colCount">Tap collages to select them.</span></div>
     <div id="colMsg" class="msg"></div>
@@ -296,22 +305,25 @@
 <!-- Collage editor -->
 <div id="shopPreview" class="hidden"><div class="ed-top"><button class="btn secondary small" id="spvClose">‹ Back to Studio</button><span class="kv" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="spvUrl"></span><a class="btn secondary small" id="spvOpen" target="_blank" rel="noopener">Open in browser</a></div><iframe id="spvFrame" title="Shop page preview"></iframe></div>
 <section id="editor" class="hidden">
+  <div class="ed-scroll" id="edScroll">
   <div class="ed-top"><button class="btn secondary small" id="edClose">‹ Back</button><input id="edName" type="text" placeholder="Collage name" aria-label="Collage name"><button class="btn secondary small" id="edUndo" title="Undo">↶</button><button class="btn secondary small" id="edRedo" title="Redo">↷</button></div>
   <div class="chips" id="modeRow" style="margin-bottom:8px"><button class="chip" data-mode="clothing">Clothing only</button><button class="chip" data-mode="me">Me + outfit</button><button class="chip" data-mode="model">AI model + outfit</button></div>
   <div class="stage" id="stage"><div class="guide v"></div><div class="guide h"></div></div>
+  <p class="hint hidden" id="edFixed">Finished image, stored exactly as imported. Layout stays fixed. Items and links come from the outfit.</p>
   <div class="tools" id="selTools"></div>
   <div id="selPanel"></div>
   <input id="replaceFile" type="file" accept="image/*" class="hidden">
   <div class="tools" id="addTools"></div>
-  <details class="ed" open><summary>Background & size</summary>
+  <details class="ed" id="edBg" open><summary>Background & size</summary>
     <div class="row" style="flex-wrap:wrap;gap:8px" id="bgRow"></div>
     <div id="designRow"></div>
     <div class="chips" style="margin-top:8px" id="sizeRow"><button class="chip" data-size="portrait">4:5 portrait</button><button class="chip" data-size="square">1:1 square</button></div>
   </details>
-  <details class="ed"><summary>Preset layouts</summary><div class="chips" id="presetRow"></div></details>
+  <details class="ed" id="edPresets"><summary>Preset layouts</summary><div class="chips" id="presetRow"></div></details>
   <details class="ed"><summary>Items & links</summary><div id="edLinks" class="links kv" style="white-space:pre-wrap"></div>
     <div class="row" style="margin-top:8px"><button class="btn secondary small" id="edCopyLinks">Copy all links</button><button class="btn danger small" id="edDelete">Delete collage</button></div></details>
   <div id="edMsg" class="msg"></div>
+  </div>
   <div class="ed-bar"><button class="btn secondary" id="edExport">Export</button><button class="btn secondary" id="edShare">Share / Publish</button><button class="btn" id="edSave">Save</button></div>
 </section>
 
@@ -673,7 +685,40 @@ const ReelEngine = (() => {
   }
   async function fillImgs(root) { for (const img of root.querySelectorAll("img[data-path]")) img.src = await url(img.dataset.path); }
   async function blobOf(path) { return await (await fetch(await url(path))).blob(); }
-  async function blobUrl(path) { if (!state.blobs.has(path)) state.blobs.set(path, URL.createObjectURL(await blobOf(path))); return state.blobs.get(path); }
+  // Safari will not paint a blob URL whose type is missing or not an image (Chrome sniffs the bytes).
+  // slice() only sets the type label — the bytes stay the same, and stored files are not rewritten.
+  function sniffImageType(bytes) {
+    if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";
+    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+    if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49) return "image/gif";
+    if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57 && bytes[9] === 0x45) return "image/webp";
+    return "";
+  }
+  async function imageTypedBlob(blob) {
+    if (blob && blob.type && blob.type.startsWith("image/")) return blob;
+    const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    const type = sniffImageType(head);
+    return type ? blob.slice(0, blob.size, type) : blob;
+  }
+  async function blobUrl(path) { if (!state.blobs.has(path)) state.blobs.set(path, URL.createObjectURL(await imageTypedBlob(await blobOf(path)))); return state.blobs.get(path); }
+  // Mobile Safari drops a layer whose decoded bitmap exceeds the GPU texture limit (~4096px). The on-screen
+  // copy is scaled only in that case. Export and publish keep using the stored file through renderLayout.
+  const STAGE_TEX = 4096;
+  async function stageImageUrl(path) {
+    const blob = await imageTypedBlob(await blobOf(path));
+    try {
+      const bmp = await createImageBitmap(blob);
+      const max = Math.max(bmp.width, bmp.height);
+      if (max <= STAGE_TEX) { bmp.close(); return URL.createObjectURL(blob); }
+      const scale = STAGE_TEX / max, w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+      bmp.close();
+      const small = await createImageBitmap(blob, { resizeWidth: w, resizeHeight: h, resizeQuality: "high" });
+      const c = document.createElement("canvas"); c.width = small.width; c.height = small.height;
+      c.getContext("2d").drawImage(small, 0, 0); small.close();
+      const out = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+      return URL.createObjectURL(out || blob);
+    } catch { return URL.createObjectURL(blob); }
+  }
 
   // ------------------------------------------------------------------ images
   function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
@@ -1294,8 +1339,10 @@ const ReelEngine = (() => {
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
   };
   const itemLabel = (g) => shortName(g?.name) || (g?.brand || "").trim() || (g?.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : "Item");
-  // Which items belong on a public shop page: a real saved name (no category placeholders) and a picture.
-  const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && hasImage);
+  // Which items belong on a public shop page. A saved name is required (blank names stay off). A publishable
+  // picture — a cutout, or the original when public_ok is set — is enough on its own, including "Link coming soon".
+  // A name plus an Amazon link is enough too: the original photo is not required, and it is never published without permission.
+  const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && (hasImage || (g.affiliate_url || "").trim()));
   const linkedItems = (items) => (items || []).filter((g) => g && g.affiliate_url);
   const missingInfo = (items) => (items || []).filter((g) => g && (!(g.name || "").trim() || !g.affiliate_url));
   // Links list for captions: ONLY items that have a link. Unlinked or unnamed items are never printed as ": (no link)".
@@ -1569,11 +1616,11 @@ const ReelEngine = (() => {
   function renderCollages() {
     const g = $("collageGrid"), selecting = !!colSel;
     if (selecting) colSel = new Set([...colSel].filter((id) => state.collages.some((c) => c.id === id)));   // drop ids that no longer exist
-    const badge = (c) => c.layout?.mode && c.layout.mode !== "clothing" ? `<span class="badge">${c.layout.mode === "me" ? "me" : "model"}</span>` : "";
-    g.innerHTML = (selecting ? "" : `<button class="tile add sq" id="addCollage">+ New collage</button>`) +
+    const badge = (c) => c.layout?.imported ? `<span class="badge">image</span>` : (c.layout?.mode && c.layout.mode !== "clothing" ? `<span class="badge">${c.layout.mode === "me" ? "me" : "model"}</span>` : "");
+    g.innerHTML = (selecting ? "" : `<button class="tile add sq" id="addCollage">+ New collage</button><button class="tile add sq" id="importCollage">Import image</button>`) +
       state.collages.map((c) => `<div class="tilewrap"><button class="tile sq ${selecting && colSel.has(c.id) ? "sel" : ""}" data-id="${c.id}" aria-pressed="${selecting ? colSel.has(c.id) : "false"}">${c.preview_path ? `<img data-path="${esc(c.preview_path)}" alt="">` : '<span class="badge" style="right:auto;left:6px">not saved yet</span>'}<span class="cap">${esc(c.name)}</span>${badge(c)}</button>${selecting ? "" : `<button class="more" data-more="${c.id}" aria-label="Options for ${esc(c.name)}" title="Options">⋯</button>`}</div>`).join("")
       || (selecting ? '<div class="empty">No collages to select.</div>' : "");
-    if (!selecting) $("addCollage").onclick = () => newCollageSheet(null);
+    if (!selecting) { $("addCollage").onclick = () => newCollageSheet(null); $("importCollage").onclick = () => importCollageSheet(); }
     g.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => {
       const c = state.collages.find((x) => x.id === t.dataset.id); if (!c) return;
       if (!selecting) return openEditor(c);
@@ -1592,7 +1639,7 @@ const ReelEngine = (() => {
   $("colDelSel").onclick = () => deleteCollages([...colSel]);
   function collageMenu(id) {
     const c = state.collages.find((x) => x.id === id); if (!c) return;
-    const sp = shopOf(c.id), mode = MODES[c.layout?.mode || "clothing"] || "Collage", items = layoutGarments(c.layout, c.outfit_id).length;
+    const sp = shopOf(c.id), mode = c.layout?.imported ? "Imported image" : (MODES[c.layout?.mode || "clothing"] || "Collage"), items = layoutGarments(c.layout, c.outfit_id).length;
     openSheet(`<h3>${esc(c.name)}</h3>
       <p class="kv" style="margin:0 0 10px">${esc(mode)} · ${items} item${items === 1 ? "" : "s"} · ${c.preview_path ? "saved " + esc(new Date(c.updated_at).toLocaleString()) : "never saved (opened " + esc(new Date(c.created_at).toLocaleString()) + ")"}${sp?.published ? " · Shop page published" : ""}</p>
       <div class="stack"><button class="btn" id="cmOpen">Open</button>
@@ -1648,6 +1695,78 @@ const ReelEngine = (() => {
     };
   }
 
+  // Ids for an imported collage: the outfit's saved order, plus any shop-page pieces that are no longer on the outfit
+  // row. When the shop page already contains the whole outfit, keep the shop page's order. Nothing is written back.
+  function outfitLinkIds(outfit) {
+    if (!outfit) return [];
+    const shopIds = (shopOfOutfit(outfit.id)?.items || []).map((it) => it.garment_id).filter(Boolean);
+    const outfitIds = outfit.items || [];
+    if (shopIds.length && shopIds.length >= outfitIds.length && outfitIds.every((id) => shopIds.includes(id))) return [...new Set(shopIds)];
+    const ids = [...outfitIds]; shopIds.forEach((id) => { if (!ids.includes(id)) ids.push(id); }); return ids;
+  }
+  // Garment row when it still exists. If its Amazon link is blank, show the link already published on the outfit's
+  // shop page. A missing row uses that published snapshot. Neither path updates clothing, links or public_ok.
+  function linkedGarment(id, outfitId) {
+    const g = garment(id);
+    const snap = ((outfitId && shopOfOutfit(outfitId)?.items) || []).find((it) => it.garment_id === id);
+    if (g) return (g.affiliate_url || !snap?.url) ? g : { ...g, affiliate_url: snap.url, product_url: g.product_url || snap.url };
+    if (!snap) return null;
+    return { id, name: snap.full_name || snap.name || "Item", brand: snap.brand || "", affiliate_url: snap.url || "", product_url: snap.url || "", category: "" };
+  }
+  function extFromFile(file) {
+    const m = /\.([a-z0-9]+)$/i.exec(file.name || ""); let ext = (m ? m[1] : "").toLowerCase(); if (ext === "jpeg") ext = "jpg";
+    if (!/^(png|jpg|webp|gif)$/.test(ext)) ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[file.type] || "";
+    return ext;
+  }
+  // Finished collage: pick an outfit, a name and an image. The file is uploaded as-is (no canvas, no shrink) and a new
+  // collage row points at it. Existing collages, outfits, items and shop pages are not written.
+  function importCollageSheet() {
+    let file = null;
+    const opts = state.outfits.map((o) => { const sp = shopOfOutfit(o.id), n = outfitLinkIds(o).length; return `<option value="${o.id}">${esc(o.name)} · ${n} item${n === 1 ? "" : "s"}${sp?.slug ? " · " + esc(sp.slug) : ""}</option>`; }).join("");
+    openSheet(`<h3>Import image</h3>
+      <p class="hint">Save a finished collage picture with an outfit. The file is stored exactly as uploaded — nothing is resized or recompressed. Every item and link from that outfit is attached, including pieces that are not on the current collage canvas.</p>
+      <div class="stack">
+        <div><label>Outfit</label>${opts ? `<select id="imOutfit"><option value="">Choose an outfit</option>${opts}</select>` : '<p class="kv">Save an outfit first.</p>'}</div>
+        <div id="imItems" class="kv"></div>
+        <div><label>Name</label><input type="text" id="imName" placeholder="Cozy Espresso — Shop the Look"></div>
+        <div><button class="btn secondary" id="imPick" ${opts ? "" : "disabled"}>Choose image</button><p class="kv" id="imFileName" style="margin:6px 0 0">No image chosen.</p><input id="imFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" class="hidden"></div>
+        <button class="btn" id="imSave" ${opts ? "" : "disabled"}>Save collage</button>
+        <div id="imMsg" class="msg err"></div></div>`);
+    const renderImItems = () => {
+      const o = state.outfits.find((x) => x.id === $("imOutfit").value);
+      const rows = o ? outfitLinkIds(o).map((id) => linkedGarment(id, o.id)).filter(Boolean) : [];
+      const linked = rows.filter((g) => g.affiliate_url).length;
+      $("imItems").innerHTML = !o ? "" : (rows.length ? `<p class="kv" style="margin:0 0 4px">${rows.length} item${rows.length === 1 ? "" : "s"} · ${linked} link${linked === 1 ? "" : "s"} attached</p>` + rows.map((g) => `<div>${esc(itemLabel(g))}${g.affiliate_url ? "" : ' <span class="nolink">· no link</span>'}</div>`).join("") : "This outfit has no items yet.");
+    };
+    if (!opts) return;
+    $("imOutfit").onchange = () => { const o = state.outfits.find((x) => x.id === $("imOutfit").value); if (o && !$("imName").value.trim()) $("imName").value = o.name; renderImItems(); };
+    $("imPick").onclick = () => $("imFile").click();
+    $("imFile").onchange = () => { file = ($("imFile").files && $("imFile").files[0]) || null; $("imFileName").textContent = file ? `${file.name} · ${(file.size / 1024).toFixed(0)} KB` : "No image chosen."; };
+    $("imSave").onclick = async () => {
+      const outfit = state.outfits.find((x) => x.id === $("imOutfit").value);
+      const name = ($("imName").value.trim() || outfit?.name || "Untitled collage");
+      if (!outfit) { $("imMsg").textContent = "Pick an outfit."; return; }
+      const itemIds = outfitLinkIds(outfit);
+      if (!itemIds.length) { $("imMsg").textContent = "This outfit has no items to attach."; return; }
+      if (!file) { $("imMsg").textContent = "Choose an image."; return; }
+      const ext = extFromFile(file);
+      if (!ext) { $("imMsg").textContent = "Choose a PNG, JPEG, WebP or GIF."; return; }
+      $("imSave").disabled = true; $("imMsg").textContent = "Saving…";
+      const id = crypto.randomUUID(), path = `${state.uid}/collages/${id}.${ext}`;
+      const type = file.type || { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif" }[ext];
+      const body = file.type ? file : new File([file], file.name || `collage.${ext}`, { type });   // bytes unchanged; type only if the picker left it blank
+      try {
+        await upload(path, body);
+        const layout = { v: 2, mode: "clothing", size: "portrait", bg: "#ffffff", imported: true, image: path, mime: type, layers: [], items: itemIds };
+        const row = { id, name, outfit_id: outfit.id, layout, preview_path: path, updated_at: new Date().toISOString() };
+        const { error } = await sb.from("collages").insert(row);
+        if (error) { await removeFiles([path]); throw new Error(error.message); }
+        closeSheet(); await loadAll();
+        const saved = state.collages.find((c) => c.id === id); if (saved) await openEditor(saved);
+      } catch (e) { const msg = $("imMsg"); if (msg) { msg.textContent = e.message; $("imSave").disabled = false; } else note("colMsg", e.message, true); }
+    };
+  }
+
   // ---------------------------------------------------------------- editor
   const ed = { c: null, layout: null, sel: null, hist: [], hi: -1, imgs: {}, dirty: false };
   const stage = $("stage");
@@ -1657,8 +1776,8 @@ const ReelEngine = (() => {
     ed.hist = ed.hist.slice(0, ed.hi + 1); ed.hist.push(s); if (ed.hist.length > 60) ed.hist.shift(); ed.hi = ed.hist.length - 1; ed.dirty = true; updateUndo();
   }
   function updateUndo() { $("edUndo").disabled = ed.hi <= 0; $("edRedo").disabled = ed.hi >= ed.hist.length - 1; }
-  $("edUndo").onclick = async () => { if (ed.hi > 0) { ed.hi--; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; await preloadImgs(); draw(); updateUndo(); } };
-  $("edRedo").onclick = async () => { if (ed.hi < ed.hist.length - 1) { ed.hi++; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; await preloadImgs(); draw(); updateUndo(); } };
+  $("edUndo").onclick = async () => { if (ed.layout?.imported || ed.hi <= 0) return; ed.hi--; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; await preloadImgs(); draw(); updateUndo(); };
+  $("edRedo").onclick = async () => { if (ed.layout?.imported || ed.hi >= ed.hist.length - 1) return; ed.hi++; ed.layout = JSON.parse(ed.hist[ed.hi]); ed.sel = null; await preloadImgs(); draw(); updateUndo(); };
 
   async function openEditor(c) {
     if (!c) return;
@@ -1666,28 +1785,72 @@ const ReelEngine = (() => {
     ed.layout.size = ed.layout.size || "portrait"; ed.layout.bg = ed.layout.bg || "#f6efe4"; ed.layout.mode = ed.layout.mode || "clothing";
     ed.sel = null; ed.hist = [snapshot()]; ed.hi = 0; ed.dirty = false; updateUndo();
     $("edName").value = c.name; $("edMsg").textContent = ""; if (c._draft) note("edMsg", "Not saved yet — tap Save to keep this collage.");
+    stage.querySelectorAll("img.fixed").forEach((e) => e.remove());
     $("editor").classList.remove("hidden"); document.body.style.overflow = "hidden";
-    await preloadImgs(); renderStatic(); draw();
+    if (ed.layout.imported && ed.layout.image) { $("editor").classList.add("imported"); $("edFixed").classList.remove("hidden"); await showImportedImage(); return; }
+    $("editor").classList.remove("imported"); $("edFixed").classList.add("hidden");
+    await preloadImgs(); renderStatic();
+    // Two frames so iOS has laid out the fixed editor before the stage is measured. A zero-width first draw
+    // sets the stage height to 0 and Mobile Safari keeps that empty canvas.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    draw();
+  }
+  // Show the stored file in the stage. No layers are drawn and nothing here resamples the picture,
+  // unless Mobile Safari cannot decode it at full size — then only the on-screen copy is scaled.
+  async function showImportedImage() {
+    stage.querySelectorAll(".layer").forEach((e) => e.remove());
+    let img = stage.querySelector("img.fixed");
+    if (!img) { img = document.createElement("img"); img.className = "fixed"; img.alt = ""; stage.appendChild(img); }
+    img.alt = $("edName").value || "Imported collage";
+    const blob = await imageTypedBlob(await blobOf(ed.layout.image));
+    let scaled = false;
+    const fit = () => {
+      const W = stage.clientWidth;
+      if (W < 2 || !img.naturalWidth) { if ((fit.n = (fit.n || 0) + 1) < 12) requestAnimationFrame(fit); return; }
+      stage.style.height = Math.round(W * img.naturalHeight / img.naturalWidth) + "px";
+    };
+    img.onload = async () => {
+      const tooBig = Math.max(img.naturalWidth || 0, img.naturalHeight || 0) > STAGE_TEX;
+      if ((!img.naturalWidth || tooBig) && !scaled) {
+        scaled = true;
+        try { img.src = await stageImageUrl(ed.layout.image); } catch { fit(); }
+        return;
+      }
+      fit();
+    };
+    img.src = URL.createObjectURL(blob);
+    if (img.complete && img.naturalWidth) img.onload();
+    $("selTools").innerHTML = ""; $("selPanel").innerHTML = ""; $("addTools").innerHTML = "";
+    renderLinks();
   }
   const layerSrc = (l) => { if (l.kind === "item") { const g = garment(l.g); return g && !isApi(g) ? (g.cutout_path || g.path) : null; } if (l.kind === "person" || l.kind === "image") return l.path; return null; };
-  // Garments a collage stands for: its item layers, or — for an outfit collage that is a single finished picture
-  // (kind "image", no item layers) — the outfit's own items, so captions, links and Amazon tagging stay complete.
+  // Garments a collage stands for. An imported image uses the item ids stored with it (every outfit link), not canvas
+  // layers. Otherwise: item layers, or — for a finished picture with no item layers — the outfit's own items.
   function layoutGarments(layout, outfitId) {
-    const fromLayers = [...new Set((layout?.layers || []).filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
+    if (layout?.imported) {
+      const ids = layout.items?.length ? layout.items : outfitLinkIds(outfitId ? state.outfits.find((x) => x.id === outfitId) : null);
+      return ids.map((id) => linkedGarment(id, outfitId)).filter(Boolean);
+    }
+    const fromLayers = [...new Set((layout?.layers || []).filter((l) => l.kind === "item").map((l) => l.g))].map((id) => linkedGarment(id, outfitId)).filter(Boolean);
     if (fromLayers.length || !outfitId) return fromLayers;
-    const o = state.outfits.find((x) => x.id === outfitId); return o ? o.items.map(garment).filter(Boolean) : [];
+    const o = state.outfits.find((x) => x.id === outfitId); return o ? o.items.map((id) => linkedGarment(id, outfitId)).filter(Boolean) : [];
   }
   async function preloadImgs() {
-    for (const l of ed.layout.layers) { const p = layerSrc(l); if (p && !ed.imgs[p]) ed.imgs[p] = await blobUrl(p); }
+    for (const l of ed.layout.layers || []) {
+      const p = layerSrc(l); if (!p || ed.imgs[p]) continue;
+      try { ed.imgs[p] = await stageImageUrl(p); } catch { ed.imgs[p] = ""; }
+    }
   }
   function closeEditor() {
     if (ed.dirty && !confirm("Leave without saving? Unsaved changes will be lost.")) return;
-    $("editor").classList.add("hidden"); document.body.style.overflow = ""; ed.c = null; loadAll();
+    $("editor").classList.add("hidden"); $("editor").classList.remove("imported"); $("edFixed").classList.add("hidden");
+    stage.querySelectorAll("img.fixed").forEach((e) => e.remove()); document.body.style.overflow = ""; ed.c = null; loadAll();
   }
   $("edClose").onclick = closeEditor;
 
   // Switch collage mode without touching item layers (links stay attached to the items).
   $("modeRow").querySelectorAll(".chip").forEach((c) => c.onclick = () => {
+    if (ed.layout?.imported) return;   // a finished image has no mode to switch
     const m = c.dataset.mode;
     if (m === ed.layout.mode) { if (m !== "clothing" && !ed.layout.layers.some((l) => l.kind === "person")) pickPersonSheet(); return; }   // already in this mode but no person placed yet (picker was cancelled or hidden) → offer the picker again
     ed.layout.mode = m;
@@ -1777,21 +1940,38 @@ const ReelEngine = (() => {
     if (designOf(bg)) return `url("${designUri(bg, 1080, Math.round(1080 * ratio(ed.layout.size)))}") center / 100% 100% no-repeat`;
     return bg.startsWith("g") ? `linear-gradient(160deg,${GRADS[bg][0]},${GRADS[bg][1]})` : bg;
   }
+  function layerFrac(l) {
+    const w = Number.isFinite(+l.w) && +l.w > 0 ? +l.w : (l.kind === "image" ? 1 : 0.3);
+    const x = Number.isFinite(+l.x) ? +l.x : 0.5, y = Number.isFinite(+l.y) ? +l.y : 0.5;
+    return { x, y, w };
+  }
   function draw() {
-    const W = stage.clientWidth, H = Math.round(W * ratio(ed.layout.size));
+    if (ed.layout?.imported) return;   // never rebuild an imported picture out of layers
+    const W = stage.clientWidth;
+    if (W < 2) { if ((draw.n = (draw.n || 0) + 1) < 12) requestAnimationFrame(draw); return; }
+    draw.n = 0;
+    const H = Math.round(W * ratio(ed.layout.size));
     stage.style.height = H + "px"; stage.style.background = stageBg(ed.layout.bg);
     stage.querySelectorAll(".layer").forEach((e) => e.remove());
     ed.layout.layers.forEach((l, i) => {
       const el = document.createElement("div"); el.className = "layer " + (l.kind === "text" ? "text" : "") + (ed.sel === i ? " sel" : ""); el.dataset.i = i;
       if (l.kind === "text") { el.textContent = l.t; el.style.color = l.color; el.style.fontFamily = l.font === "serif" ? "Fraunces, serif" : '"Inter Tight", sans-serif'; el.style.fontWeight = l.weight || 600; el.style.fontSize = l.size * W + "px"; }
-      else { const im = document.createElement("img"); im.src = ed.imgs[layerSrc(l)] || ""; im.alt = ""; el.appendChild(im); }
+      else {
+        const im = document.createElement("img"); im.alt = ""; im.src = ed.imgs[layerSrc(l)] || "";
+        // Give the layer a real height before the image decodes. iOS otherwise snapshots a 0×0 transformed
+        // layer (will-change used to do this permanently) and the stage stays blank.
+        const box = layerFrac(l); el.style.height = Math.max(1, Math.round(box.w * W)) + "px";
+        im.addEventListener("load", () => { if (im.naturalWidth) el.style.height = Math.max(1, Math.round(el.getBoundingClientRect().width * im.naturalHeight / im.naturalWidth)) + "px"; });
+        el.appendChild(im);
+      }
       place(el, l, W, H); el.style.zIndex = i + 1; attachGestures(el, i); stage.appendChild(el);
     });
     renderSelTools(); renderLinks();
   }
   function place(el, l, W, H) {
-    if (l.kind !== "text") el.style.width = l.w * W + "px";
-    el.style.transform = `translate(${l.x * W}px, ${l.y * H}px) translate(-50%,-50%) rotate(${l.rot || 0}deg)`;
+    const box = layerFrac(l);
+    if (l.kind !== "text") el.style.width = box.w * W + "px";
+    el.style.transform = `translate(${box.x * W}px, ${box.y * H}px) translate(-50%,-50%) rotate(${l.rot || 0}deg)`;
   }
   function attachGestures(el, i) {
     const pts = new Map(); let start = null, moved = false;
@@ -1903,30 +2083,51 @@ const ReelEngine = (() => {
       l.g = t.dataset.id; ed.sel = i; await preloadImgs(); pushHistory(); closeSheet(); renderStatic(); draw();
     });
   }
+  function collageFileExt(layout, blob) {
+    const fromPath = String(layout?.image || "").split(".").pop().toLowerCase();
+    if (layout?.imported && /^[a-z0-9]+$/.test(fromPath)) return fromPath === "jpeg" ? "jpg" : fromPath;
+    if (blob?.type === "image/png") return "png"; if (blob?.type === "image/webp") return "webp"; if (blob?.type === "image/gif") return "gif";
+    return "jpg";
+  }
   async function renderLayout(layout, W) {
+    if (layout?.imported && layout.image) return imageTypedBlob(await blobOf(layout.image));   // original bytes — export, shop, Facebook and Amazon all share this path
     const H = Math.round(W * ratio(layout.size)), c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("This browser could not draw the collage.");
     const bg = layout.bg || "#ffffff";
     if (designOf(bg)) { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); ctx.drawImage(await loadImg(designUri(bg, W, H)), 0, 0, W, H); }
     else { if (bg.startsWith("g")) { const gr = ctx.createLinearGradient(0, 0, W, H); gr.addColorStop(0, GRADS[bg][0]); gr.addColorStop(1, GRADS[bg][1]); ctx.fillStyle = gr; } else ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); }
     try { await document.fonts.load('600 40px Fraunces'); await document.fonts.load('600 40px "Inter Tight"'); } catch {}
     for (const l of layout.layers) {
-      ctx.save(); ctx.translate(l.x * W, l.y * H); ctx.rotate(((l.rot || 0) * Math.PI) / 180);
+      ctx.save();
+      const box = l.kind === "text" ? { x: Number.isFinite(+l.x) ? +l.x : 0.5, y: Number.isFinite(+l.y) ? +l.y : 0.5, w: l.w } : layerFrac(l);
+      ctx.translate(box.x * W, box.y * H); ctx.rotate(((l.rot || 0) * Math.PI) / 180);
       if (l.kind === "text") {
         const px = l.size * W; ctx.font = `${l.weight || 600} ${px}px ${l.font === "serif" ? "Fraunces, serif" : '"Inter Tight", sans-serif'}`;
         ctx.fillStyle = l.color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         const lines = String(l.t).split("\n"); lines.forEach((ln, k) => ctx.fillText(ln, 0, (k - (lines.length - 1) / 2) * px * 1.15));
       } else {
         const p = layerSrc(l); if (!p) { ctx.restore(); continue; }
-        const img = await loadImg(await blobUrl(p)); const w = l.w * W, h = (w * img.height) / img.width; ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        try {
+          const img = await loadImg(await blobUrl(p)); const w = box.w * W, h = (w * img.height) / img.width; ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        } catch { /* a picture that cannot be decoded on this device is skipped; other layers still draw */ }
       }
       ctx.restore();
     }
-    return await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.92));
+    if (!blob) throw new Error("This browser could not save the collage image.");
+    return blob;
   }
   $("edSave").onclick = async () => {
     $("edSave").disabled = true; note("edMsg", "Saving…");
     try {
       const name = $("edName").value.trim() || "Untitled collage";
+      if (ed.layout?.imported) {   // rename only — do not render or upload over the stored file
+        const row = { name, updated_at: new Date().toISOString() };
+        const { error } = await sb.from("collages").update(row).eq("id", ed.c.id);
+        if (error) throw new Error(error.message);
+        ed.c = { ...ed.c, name }; ed.dirty = false; note("edMsg", "Saved. The imported image was left as uploaded. The shop page changes only when you use Share / Publish.");
+        $("edSave").disabled = false; return;
+      }
       const preview = await renderLayout(ed.layout, 540); const p = `${state.uid}/collages/${ed.c.id}.jpg`; await upload(p, preview);
       const row = { name, layout: ed.layout, preview_path: p, updated_at: new Date().toISOString() };
       const { error } = ed.c._draft
@@ -1943,7 +2144,11 @@ const ReelEngine = (() => {
     } catch (e) { note("edMsg", e.message, true); }
     $("edSave").disabled = false;
   };
-  $("edExport").onclick = async () => { note("edMsg", "Rendering…"); try { const blob = await renderLayout(ed.layout, 2160); await saveToPhotos(blob, `${($("edName").value || "collage").replace(/\W+/g, "-")}.jpg`); note("edMsg", ""); } catch (e) { note("edMsg", e.message, true); } };
+  $("edExport").onclick = async () => {
+    const imported = !!ed.layout?.imported; note("edMsg", imported ? "Preparing the original image…" : "Rendering…");
+    try { const blob = await renderLayout(ed.layout, 2160); const base = ($("edName").value || "collage").replace(/\W+/g, "-"); await saveToPhotos(blob, imported ? `${base}.${collageFileExt(ed.layout, blob)}` : `${base}.jpg`); note("edMsg", ""); }
+    catch (e) { note("edMsg", e.message, true); }
+  };
   $("edDelete").onclick = async () => {
     if (ed.c._draft) { if (!confirm("Discard this unsaved collage?")) return; ed.dirty = false; closeEditor(); return; }   // nothing in the database yet
     if (shopOf(ed.c.id)?.published) { note("edMsg", "This collage has a live Shop page. Delete never changes published pages — unpublish it from Share / Publish first if you want to delete the collage.", true); return; }
@@ -1952,7 +2157,12 @@ const ReelEngine = (() => {
     if (error) { note("edMsg", "Delete failed: " + error.message + " Nothing was changed.", true); return; }
     await removeFiles([ed.c.preview_path]); ed.dirty = false; closeEditor();
   };
-  window.addEventListener("resize", () => { if (ed.c) draw(); });
+  window.addEventListener("resize", () => {
+    if (!ed.c) return;
+    if (ed.layout?.imported) { const img = stage.querySelector("img.fixed"); if (img && img.naturalWidth && stage.clientWidth >= 2) stage.style.height = Math.round(stage.clientWidth * img.naturalHeight / img.naturalWidth) + "px"; return; }
+    draw();
+  });
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", () => { if (ed.c && !ed.layout?.imported) draw(); });
 
   // ================================================================== CAPTIONS (free, from your item metadata)
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -1991,9 +2201,21 @@ const ReelEngine = (() => {
   const shopOfOutfit = (outfitId) => outfitId ? (state.shops.find((p) => p.outfit_id === outfitId) || state.shops.find((p) => { const c = state.collages.find((x) => x.id === p.collage_id); return c && c.outfit_id === outfitId; }) || null) : null;
   const shopFor = (c) => (c.outfit_id && shopOfOutfit(c.outfit_id)) || shopOf(c.id) || null;
   const shopLink = (sp) => SHOP_BASE + sp.slug;
+  // Owner-uploaded shop photo lives beside the auto collage file. The filename is the flag — no extra column.
+  const isCustomHeroPath = (p) => /\/custom\.jpg$/i.test(String(p || ""));
+  // Decide the shop page's main image. "custom" uploads or keeps custom.jpg; "collage" (or a page that never had one)
+  // uses the auto-rendered collage. Republish with no hero option keeps a custom image already in use.
+  function resolveShopHero(prevPath, opts) {
+    const keepCustom = opts.hero === "custom" || (opts.hero !== "collage" && isCustomHeroPath(prevPath));
+    if (!keepCustom) return { custom: false, upload: false, dropCustom: isCustomHeroPath(prevPath) };
+    if (opts.heroBlob) return { custom: true, upload: true, dropCustom: false };
+    if (isCustomHeroPath(prevPath)) return { custom: true, upload: false, dropCustom: false };
+    return { error: "Choose an image to use as the shop page photo, or switch to Auto collage." };
+  }
   async function uploadPublic(path, blob) { const { error } = await sb.storage.from("shop").upload(path, blob, { contentType: blob.type, upsert: true }); if (error) throw new Error(error.message); }
   // Tappable areas on the published collage image: one rectangle per clothing item, in 0–1 collage coordinates.
   async function layoutHotspots(layout) {
+    if (layout?.imported) return {};   // a finished image has no placed items, so no made-up tap targets
     const R = ratio(layout.size || "portrait"), out = {};
     for (const l of layout.layers || []) {
       if (l.kind !== "item" || out[l.g]) continue; const p = layerSrc(l); if (!p) continue;
@@ -2001,22 +2223,36 @@ const ReelEngine = (() => {
     }
     return out;
   }
-  // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = collage image + item images in the
-  // public bucket + item list (name, link, hotspot). Unlinked items are included and shown as "Link coming soon".
+  // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = main image + item images we are
+  // allowed to show + item list (name, link, hotspot). Unlinked items with a picture are included as "Link coming soon".
+  // Named items with a link are included even with no publishable photo. A custom main image (custom.jpg) replaces the
+  // auto collage; hotspots are omitted then because they only match the collage layout. An imported collage is copied
+  // byte-for-byte (renderLayout returns the stored file). Import itself does not call this.
   async function publishShopFor(c, layout, opts = {}) {
-    const itemsIn = layoutGarments(layout, c.outfit_id);   // a picture-only outfit collage publishes the outfit's items (no hotspots)
+    const itemsIn = layoutGarments(layout, c.outfit_id);   // picture-only and imported collages publish the outfit's items
     const sp = shopFor(c);
     const slug = sp?.slug || Math.random().toString(36).slice(2, 12), base = `${state.uid}/${slug}`;
-    await uploadPublic(`${base}/collage.jpg`, await renderLayout(layout, 1080));
-    const spots = await layoutHotspots(layout);
-    // Public list: only real products — a saved name (no "Tops"/"Accessory" placeholders) and a picture. Items without a
-    // name or picture are left off the page (they stay in the Studio untouched); a named item without a link shows as
-    // "Link coming soon".
+    const prev = sp || {};
+    const collageBlob = await renderLayout(layout, 1080);
+    const collageFile = layout?.imported ? "collage." + collageFileExt(layout, collageBlob) : "collage.jpg";
+    const autoPath = `${base}/${collageFile}`, customPath = `${base}/custom.jpg`;
+    await uploadPublic(autoPath, collageBlob);   // homepage cover still falls back to this file
+    const heroPick = resolveShopHero(prev.collage_public_path, opts);
+    if (heroPick.error) throw new Error(heroPick.error);
+    let collage_public_path = autoPath;
+    if (heroPick.custom) {
+      if (heroPick.upload) { const blob = await shrink(opts.heroBlob, 1080, "image/jpeg", 0.9); if (!blob) throw new Error("That image could not be read. Try a JPG or PNG."); await uploadPublic(customPath, blob); }
+      collage_public_path = customPath;
+    } else if (heroPick.dropCustom && prev.collage_public_path) await sb.storage.from("shop").remove([prev.collage_public_path]);
+    const spots = heroPick.custom ? {} : await layoutHotspots(layout);   // tap areas only match the auto collage
+    // Public list: a saved name. Blank names are left off (they stay in the Studio). A cutout, or an original the owner
+    // marked public_ok, is copied into the shop bucket. Otherwise a named item with an Amazon link is listed with no
+    // picture — the original photo is never uploaded.
     const items = [];
     for (const g of itemsIn) {
       if (!(g.name || "").trim()) continue;
       const common = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: spots[g.id] || null };
-      if (isApi(g)) { if (!g.image_url) continue; items.push({ ...common, image_path: null, image_url: g.image_url, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
+      if (isApi(g)) { if (!shopEligible(g, !!g.image_url)) continue; items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
       let image_path = null;
       const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
       if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
@@ -2025,13 +2261,13 @@ const ReelEngine = (() => {
     }
     // Homepage cover: the outfit's AI photo (the photo set as outfit cover) by default, the collage when chosen or when
     // there is no photo. Always a plain copy of an existing image — publishing never generates anything or spends credits.
-    const prev = sp || {}; const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
+    const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
     const coverSource = opts.cover_source || prev.cover_source || "photo";
     const hero = o ? state.generations.find((g) => g.id === o.hero_generation_id) : null;
-    let cover_public_path = `${base}/collage.jpg`;
+    let cover_public_path = autoPath;
     if (coverSource === "photo" && hero) { try { await uploadPublic(`${base}/cover.jpg`, await shrink(await blobOf(hero.path), 1080, "image/jpeg", 0.88)); cover_public_path = `${base}/cover.jpg`; } catch (e) { console.warn("cover copy failed, using collage", e); } }
     const row = { collage_id: c.id, outfit_id: c.outfit_id || null, slug, title: opts.title || prev.title || c.name || "This outfit", caption: opts.caption !== undefined ? (opts.caption || null) : (prev.caption ?? null),
-      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString(),
+      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path, items, published: true, updated_at: new Date().toISOString(),
       listed: prev.listed ?? true, featured: prev.featured ?? false, sort_order: prev.sort_order ?? 0, category: opts.category !== undefined ? opts.category : (prev.category ?? null),
       cover_source: coverSource, cover_public_path, storefront_url: state.settings.amazon_storefront_url || null };
     const write = (r) => sp ? sb.from("shop_pages").update(r).eq("id", sp.id).eq("user_id", state.uid) : sb.from("shop_pages").insert(r);
@@ -2157,7 +2393,7 @@ const ReelEngine = (() => {
   $("storeView").addEventListener("click", () => openShopPreview(SHOP_HOME));
   $("storeCopy").addEventListener("click", () => copyText(SHOP_HOME, "storeMsg"));
   $("storeOpenTab").href = fromStudio(SHOP_HOME); $("storeUrl").textContent = SHOP_HOME;
-  async function publishShop(caption) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title }); }
+  async function publishShop(caption, extra = {}) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title, hero: extra.hero, heroBlob: extra.heroBlob || null }); }
   // Keep published pages in sync after a product edit: every live page whose collage contains the item is re-published.
   async function syncShopPagesForGarment(gid) {
     const done = new Set(); let n = 0;
@@ -2190,7 +2426,7 @@ const ReelEngine = (() => {
     const sp = shopFor(ed.c); const ctx = { ...captionCtx(), shop_url: sp?.published ? shopLink(sp) : "" }; let platform = "instagram", tone = "casual";
     const miss = missingInfo(ctx.items);
     openSheet(`<h3>Share / Publish</h3><div class="stack">
-      ${miss.length ? `<p class="kv" style="color:var(--danger)">${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${esc(miss.map(itemLabel).join(", "))}): left out of captions and shown as “Link coming soon” on the shop page. Select the item on the collage to add the details.</p>` : ""}
+      ${miss.length ? `<p class="kv" style="color:var(--danger)">${miss.length} item${miss.length > 1 ? "s" : ""} without a name or Amazon link (${esc(miss.map(itemLabel).join(", "))}): left out of captions and shown as “Link coming soon” on the shop page. ${ed.layout?.imported ? "Add the details under Items & links." : "Select the item on the collage to add the details."}</p>` : ""}
       <div class="chips" id="capPlat"><button class="chip on" data-p="instagram">Instagram</button><button class="chip" data-p="facebook">Facebook</button><button class="chip" data-p="tiktok">TikTok</button></div>
       <div class="chips" id="capTone"><button class="chip on" data-t="casual">Casual</button><button class="chip" data-t="polished">Polished</button><button class="chip" data-t="playful">Playful</button><button class="chip" id="capRegen">↻ New wording</button></div>
       <textarea id="capText" style="min-height:150px"></textarea>
@@ -2198,6 +2434,16 @@ const ReelEngine = (() => {
       <p class="kv">You can edit the caption above before copying or posting — press and hold to select, or tap Select all.</p>
       <hr style="border:0;border-top:1px solid var(--line)">
       <div class="kv">${sp?.published ? `Shop page is live: <a href="${esc(fromStudio(shopLink(sp)))}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(shopLink(sp))}</a>` : "Shop page not published yet."}</div>
+      <div><label>Shop page photo</label>
+        <div class="chips" id="shHero"><button class="chip" data-hero="collage">Auto collage</button><button class="chip" data-hero="custom">Use my own image</button></div>
+        <div id="shHeroBox" class="stack hidden" style="margin-top:8px">
+          <img id="shHeroPrev" alt="Shop page photo preview" class="big" style="max-height:220px;object-fit:contain;background:#fff;display:none">
+          <button class="btn secondary" id="shHeroPick">Choose image</button>
+          <p class="kv" id="shHeroNote" style="margin:0"></p>
+        </div>
+        <input id="shHeroFile" type="file" accept="image/*" class="hidden">
+      </div>
+      <p class="kv">Items with a name and an Amazon link are listed even when their original photo is not published. Photos are only copied when the item has a cutout, or you have ticked permission on the item.</p>
       <div class="row"><button class="btn" id="shPublish">${sp?.published ? "Update shop page" : "Publish shop page"}</button>${sp?.published ? '<button class="btn secondary" id="shUnpub">Unpublish</button>' : ""}</div>
       ${sp?.published ? '<div class="row"><button class="btn secondary small" id="shCopyLink">Copy link</button><a class="btn secondary small" id="shOpen" target="_blank" rel="noopener">Open page</a></div>' : ""}
       <hr style="border:0;border-top:1px solid var(--line)">
@@ -2215,7 +2461,29 @@ const ReelEngine = (() => {
     $("capRegen").onclick = regen; regen();
     $("capCopy").onclick = () => copyText($("capText").value, "shMsg"); $("capSelect").onclick = () => selectAllText($("capText"));
     $("capLinks").onclick = () => copyText(linksText(ctx.title, "", ctx.items), "shMsg");
-    $("shPublish").onclick = async () => { $("shPublish").disabled = true; note("shMsg", "Publishing…"); try { const p = await publishShop($("capText").value); note("shMsg", "Live at " + shopLink(p)); shareSheet(); } catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; } };
+    let heroMode = isCustomHeroPath(sp?.collage_public_path) ? "custom" : "collage", heroFile = null, heroPreviewUrl = "";
+    const paintHero = () => {
+      $("shHero").querySelectorAll("[data-hero]").forEach((b) => b.classList.toggle("on", b.dataset.hero === heroMode));
+      $("shHeroBox").classList.toggle("hidden", heroMode !== "custom");
+      const prev = $("shHeroPrev");
+      if (heroPreviewUrl) { URL.revokeObjectURL(heroPreviewUrl); heroPreviewUrl = ""; }
+      const src = heroMode !== "custom" ? "" : heroFile ? (heroPreviewUrl = URL.createObjectURL(heroFile)) : (isCustomHeroPath(sp?.collage_public_path) ? pubUrl(sp.collage_public_path) + "?v=" + encodeURIComponent(sp.updated_at || "") : "");
+      prev.style.display = src ? "block" : "none"; if (src) prev.src = src;
+      $("shHeroPick").textContent = heroFile || isCustomHeroPath(sp?.collage_public_path) ? "Change image" : "Choose image";
+      $("shHeroNote").textContent = heroFile ? "This photo replaces the collage on the shop page. Product links stay in the list. Tap areas on the photo are off."
+        : isCustomHeroPath(sp?.collage_public_path) ? "Update keeps this photo. Choose a new file to replace it, or switch to Auto collage. Tap areas on the photo stay off."
+        : "Choose a photo to use instead of the collage. Every product link still appears in the list. Tap areas on the photo are off.";
+    };
+    $("shHero").onclick = (e) => { const b = e.target.closest("[data-hero]"); if (!b) return; heroMode = b.dataset.hero; paintHero(); };
+    $("shHeroPick").onclick = () => $("shHeroFile").click();
+    $("shHeroFile").onchange = () => { const f = $("shHeroFile").files && $("shHeroFile").files[0]; if (!f) return; heroFile = f; heroMode = "custom"; paintHero(); };
+    paintHero();
+    $("shPublish").onclick = async () => {
+      if (heroMode === "custom" && !heroFile && !isCustomHeroPath(sp?.collage_public_path)) { note("shMsg", "Choose an image first, or switch to Auto collage.", true); return; }
+      $("shPublish").disabled = true; note("shMsg", "Publishing…");
+      try { const p = await publishShop($("capText").value, { hero: heroMode, heroBlob: heroMode === "custom" ? heroFile : null }); note("shMsg", "Live at " + shopLink(p)); shareSheet(); }
+      catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; }
+    };
     if (sp?.published) {
       $("shUnpub").onclick = async () => { if (!confirm("Unpublish this shop page? The link will stop working.")) return; await unpublishShop(sp); shareSheet(); };
       $("shCopyLink").onclick = () => copyText(shopLink(sp), "shMsg"); $("shOpen").href = shopLink(sp); $("shOpen").onclick = (e) => { e.preventDefault(); openShopPreview(shopLink(sp)); };
@@ -2224,8 +2492,11 @@ const ReelEngine = (() => {
       const link = sp?.published ? shopLink(sp) : "";
       $("shFbPost").disabled = true; note("shMsg", "Preparing post…");
       try {
-        const id = crypto.randomUUID(), path = `${state.uid}/fb/${id}.jpg`;
-        await upload(path, await renderLayout(ed.layout, 1620));
+        const id = crypto.randomUUID();
+        const blob = await renderLayout(ed.layout, 1620);
+        const ext = ed.layout?.imported ? collageFileExt(ed.layout, blob) : "jpg";
+        const path = `${state.uid}/fb/${id}.${ext}`;
+        await upload(path, blob);
         const cap = $("capText").value.trim(), caption = cap + (link && !cap.includes(link) ? "\n\nShop every piece: " + link : "");   // shop link always in Page posts, never twice
         const { error } = await sb.from("fb_posts").insert({ id, collage_id: ed.c.id, caption, image_path: path, status: "draft" });
         if (error) throw new Error(error.message);
@@ -2236,13 +2507,13 @@ const ReelEngine = (() => {
     $("shFacebook").onclick = async () => {
       const link = sp?.published ? shopLink(sp) : ""; const text = $("capText").value + (link ? "\n\n" + link : "");
       try {
-        const blob = await renderLayout(ed.layout, 1620); const file = new File([blob], "outfit.jpg", { type: "image/jpeg" });
+        const blob = await renderLayout(ed.layout, 1620); const ext = ed.layout?.imported ? collageFileExt(ed.layout, blob) : "jpg"; const file = new File([blob], `outfit.${ext}`, { type: blob.type || (ext === "png" ? "image/png" : "image/jpeg") });
         if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text }); note("shMsg", "Shared. If the text didn't come through, use Copy caption + Copy link."); return; }
       } catch (e) { if (e && e.name === "AbortError") return; }
       await copyText(text, "shMsg");
       if (link) window.open("https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(link), "_blank"); else note("shMsg", "Caption copied. Publish the shop page to share a link, or save the image and post it as a photo.", false);
     };
-    $("shImage").onclick = async () => { const blob = await renderLayout(ed.layout, 2160); await saveToPhotos(blob, `${ctx.title.replace(/\W+/g, "-")}.jpg`); };
+    $("shImage").onclick = async () => { const blob = await renderLayout(ed.layout, 2160); const ext = ed.layout?.imported ? collageFileExt(ed.layout, blob) : "jpg"; await saveToPhotos(blob, `${ctx.title.replace(/\W+/g, "-")}.${ext}`); };
     $("shAmazon").onclick = () => amazonShareSheet({ ...ed.c, name: $("edName").value.trim() || ed.c.name }, ed.layout);
   }
   // Amazon Storefront: everything needed to post the collage as a shoppable photo or Idea List by hand. Amazon has no
@@ -2293,14 +2564,17 @@ const ReelEngine = (() => {
   function amazonShareSheet(c, layout) {
     if (!layout?.layers) { alert("Open the collage and save it once first."); return; }
     const title = (c?.name || "Collage").trim();
+    const imported = !!layout?.imported;
     const items = layoutGarments(layout, c?.outfit_id);
     const linked = linkedItems(items), unlinked = items.filter((g) => !g.affiliate_url);
     const people = peopleInLayout(layout), hasAi = people.some((p) => p.kind === "ai"), hasEdited = people.some((p) => p.kind === "edited");
-    const hasText = layout.layers.some((l) => l.kind === "text");
+    const hasText = (layout.layers || []).some((l) => l.kind === "text");
     const opt = { size: layout.size === "square" ? "square" : "portrait", text: false, plain: false, tag: hasAi };
     const store = (state.site && state.site.storefront_url) || state.settings.amazon_storefront_url || "";
     const asinOf = (g) => g.asin || tagAmazon(g.affiliate_url || "", "").asin || "";
-    const peopleNote = !people.length
+    const peopleNote = imported
+      ? `<p class="kv"><strong>Finished image.</strong> It is saved exactly as imported, so this screen does not guess whether anyone in the picture is real or AI-generated. Answer Amazon's upload question from the picture itself.</p>`
+      : !people.length
       ? `<p class="kv"><strong>No people in this collage.</strong> Amazon's AI-people question at upload does not apply; answer "No" if it is asked.</p>`
       : hasAi
         ? `<p class="kv" style="color:var(--danger)"><strong>Contains an AI-generated person</strong> (${esc(people.filter((p) => p.kind === "ai").map((p) => p.who).join(", "))}). Answer <strong>Yes</strong> when Amazon asks whether the content shows AI-generated people. The export also carries Amazon's "contains-synthetic-performer" metadata keyword (optional below).</p>`
@@ -2311,13 +2585,13 @@ const ReelEngine = (() => {
     openSheet(`<h3>Share to Amazon</h3>
       <p class="hint">Three steps, nothing is posted automatically: <strong>1.</strong> Save the image. <strong>2.</strong> In the Amazon app open your storefront → Upload → Shoppable photo and pick the saved image. <strong>3.</strong> Tag the products and paste the description.</p>
       <div class="stack">
-        <div><img id="azPrev" alt="Amazon export preview" style="width:100%;max-width:360px;display:block;margin:0 auto;border-radius:12px;background:#f3efe8;aspect-ratio:${opt.size === "square" ? "1/1" : "4/5"}">
-          <div class="chips" style="margin-top:8px" id="azOpts">
+        <div><img id="azPrev" alt="Amazon export preview" style="width:100%;max-width:360px;display:block;margin:0 auto;border-radius:12px;background:#f3efe8;${imported ? "" : `aspect-ratio:${opt.size === "square" ? "1/1" : "4/5"}`}">
+          ${imported ? `<p class="kv">The finished image is used exactly as imported. Size and background options stay off so it is not resized or recompressed. The collage stored in the Studio is not replaced.</p>` : `<div class="chips" style="margin-top:8px" id="azOpts">
             <button class="chip ${opt.size === "square" ? "on" : ""}" data-size="square">1:1</button><button class="chip ${opt.size === "portrait" ? "on" : ""}" data-size="portrait">4:5</button>
             ${hasText ? '<button class="chip" data-opt="text">Keep text overlays</button>' : ""}
             <button class="chip" data-opt="plain">Plain white background</button>
           </div>
-          <p class="kv">This export is separate from your collage — the saved collage, its Shop page and Facebook posts stay exactly as they are.</p></div>
+          <p class="kv">This export is separate from your collage — the saved collage, its Shop page and Facebook posts stay exactly as they are.</p>`}</div>
         ${peopleNote}
         ${people.length ? `<label class="row" style="align-items:center;gap:8px"><input type="checkbox" id="azTag" ${opt.tag ? "checked" : ""}> <span class="kv">Add Amazon's "contains-synthetic-performer" keyword to the file's metadata</span></label>` : ""}
         <button class="btn" id="azSave">Save image for Amazon</button>
@@ -2332,8 +2606,8 @@ const ReelEngine = (() => {
     fillImgs($("sheetBody"));
     const exportLayout = () => ({ ...layout, size: opt.size, bg: opt.plain ? "#ffffff" : layout.bg, layers: layout.layers.filter((l) => opt.text || l.kind !== "text") });
     let seq = 0;
-    const preview = async () => { const my = ++seq; try { const blob = await renderLayout(exportLayout(), 540); if (my !== seq) return; const img = $("azPrev"); if (!img) return; if (img.dataset.u) URL.revokeObjectURL(img.dataset.u); img.dataset.u = URL.createObjectURL(blob); img.src = img.dataset.u; img.style.aspectRatio = opt.size === "square" ? "1/1" : "4/5"; } catch (e) { note("azMsg", e.message, true); } };
-    $("azOpts").onclick = (e) => {
+    const preview = async () => { const my = ++seq; try { const blob = await renderLayout(imported ? layout : exportLayout(), 540); if (my !== seq) return; const img = $("azPrev"); if (!img) return; if (img.dataset.u) URL.revokeObjectURL(img.dataset.u); img.dataset.u = URL.createObjectURL(blob); img.src = img.dataset.u; if (!imported) img.style.aspectRatio = opt.size === "square" ? "1/1" : "4/5"; } catch (e) { note("azMsg", e.message, true); } };
+    if ($("azOpts")) $("azOpts").onclick = (e) => {
       const b = e.target.closest(".chip"); if (!b) return;
       if (b.dataset.size) { opt.size = b.dataset.size; $("azOpts").querySelectorAll("[data-size]").forEach((x) => x.classList.toggle("on", x === b)); }
       else { opt[b.dataset.opt] = !opt[b.dataset.opt]; b.classList.toggle("on", opt[b.dataset.opt]); }
@@ -2341,11 +2615,11 @@ const ReelEngine = (() => {
     };
     if ($("azTag")) $("azTag").onchange = () => { opt.tag = $("azTag").checked; };
     $("azSave").onclick = async () => {
-      $("azSave").disabled = true; note("azMsg", "Rendering…");
+      $("azSave").disabled = true; note("azMsg", imported ? "Preparing the original image…" : "Rendering…");
       try {
-        let blob = await renderLayout(exportLayout(), 2160);
-        if (opt.tag) blob = new Blob([withXmpKeywords(await blob.arrayBuffer(), ["contains-synthetic-performer"])], { type: "image/jpeg" });
-        const how = await saveFile(blob, `${title.replace(/\W+/g, "-")}-amazon-${opt.size === "square" ? "1x1" : "4x5"}.jpg`);
+        let blob = await renderLayout(imported ? layout : exportLayout(), 2160);
+        if (!imported && opt.tag) blob = new Blob([withXmpKeywords(await blob.arrayBuffer(), ["contains-synthetic-performer"])], { type: "image/jpeg" });
+        const how = await saveFile(blob, imported ? `${title.replace(/\W+/g, "-")}.${collageFileExt(layout, blob)}` : `${title.replace(/\W+/g, "-")}-amazon-${opt.size === "square" ? "1x1" : "4x5"}.jpg`);
         note("azMsg", how === "shared" ? "Image saved. Now upload it in the Amazon app and tag the products below." : "Image downloaded. Now upload it in the Amazon app and tag the products below.");
       } catch (e) { if (e.name !== "AbortError") note("azMsg", e.message, true); else note("azMsg", ""); }
       $("azSave").disabled = false;
