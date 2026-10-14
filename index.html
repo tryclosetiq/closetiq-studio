@@ -151,9 +151,10 @@
     <h2>My Models</h2>
     <p class="hint">Your photos, AI versions of you, and reusable AI models. Tap one for options.</p>
     <div class="card" style="margin-bottom:12px"><strong>My Reference Photos</strong><p class="kv" id="refHint" style="margin:4px 0 8px"></p>
-      <div class="strip" id="refStrip"></div>
+      <label>Face · close-up portrait (identity)</label><div class="strip" id="refFaceStrip"></div>
+      <label style="margin-top:8px">Body · full-length photos (proportions)</label><div class="strip" id="refBodyStrip"></div>
       <button class="btn secondary small" id="refStyle" style="margin-top:6px">Style me in an outfit (pose, hair, scene)</button>
-      <input id="refFile" type="file" accept="image/*" multiple class="hidden"></div>
+      <input id="refFaceFile" type="file" accept="image/*" class="hidden"><input id="refBodyFile" type="file" accept="image/*" multiple class="hidden"></div>
     <div class="chips" id="modelFilter" style="margin-bottom:10px"><button class="chip on" data-f="all">All</button><button class="chip" data-f="photo">My photos</button><button class="chip" data-f="ai_self">AI me</button><button class="chip" data-f="ai_model">AI models</button><button class="chip" data-f="default">Presets</button></div>
     <div class="grid" id="modelGrid"></div>
     <input id="selfieFile" type="file" accept="image/*" multiple class="hidden">
@@ -842,14 +843,16 @@ const ReelEngine = (() => {
       <div class="stack" style="margin-top:12px">
         ${kind !== "generation" && owner ? `<div><label>Name</label><input type="text" id="pName" value="${esc(p.label)}"></div>` : ""}
         ${kind === "model" && p.style ? `<p class="kv" style="margin:0">Base picture for Style Me${styleSummary(p.style) ? ": " + esc(styleSummary(p.style)) : ""}.</p>` : ""}
-        ${kind === "selfie" && owner ? `<button class="btn secondary" id="pRef">${p.is_reference ? "Remove from reference photos" : "Use as reference photo (identity)"}</button>${p.is_reference && refPhotos()[0]?.id !== id ? '<button class="btn secondary" id="pRefPrimary">Make primary reference</button>' : ""}` : ""}
+        ${kind === "selfie" && owner ? (p.is_reference ? `<p class="kv" style="margin:0">${(p.ref_role || "face") === "body" ? "Body reference (proportions)" : "Face reference (identity)"}${refPhotos(p.ref_role || "face")[0]?.id === id ? " · primary" : ""}</p><button class="btn secondary" id="pRef">Remove from reference photos</button>${refPhotos(p.ref_role || "face")[0]?.id !== id ? '<button class="btn secondary" id="pRefPrimary">Make primary</button>' : ""}` : `<button class="btn secondary" id="pRefFace">Use as face reference (close-up portrait)</button><button class="btn secondary" id="pRefBody">Use as body reference (full-length)</button>`) : ""}
         <button class="btn" id="pUse">Use in Try-On</button>
         ${owner ? `<button class="btn secondary" id="pCut">${p.cutout_path ? "Redo person cutout" : "Person cutout (remove background)"} · ${cost("bgremove")} credit</button>` : ""}
         <button class="btn secondary" id="pSave">Save to Photos</button>
         ${kind === "generation" ? '<button class="btn secondary" id="pAsModel">Save as model</button>' : ""}
         ${owner ? '<button class="btn danger" id="pDel">Delete</button>' : ""}<div id="pMsg" class="msg"></div></div>`);
     $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("pImg").src = await url(p[c.dataset.v]); });
-    if ($("pRef")) $("pRef").onclick = async () => { try { await setReference(id, !p.is_reference); personSheet(kind, id); } catch (e) { note("pMsg", e.message, true); } };
+    if ($("pRef")) $("pRef").onclick = async () => { try { await setReference(id, false, p.ref_role || "face"); personSheet(kind, id); } catch (e) { note("pMsg", e.message, true); } };
+    if ($("pRefFace")) $("pRefFace").onclick = async () => { try { await setReference(id, true, "face"); personSheet(kind, id); } catch (e) { note("pMsg", e.message, true); } };
+    if ($("pRefBody")) $("pRefBody").onclick = async () => { try { await setReference(id, true, "body"); personSheet(kind, id); } catch (e) { note("pMsg", e.message, true); } };
     if ($("pRefPrimary")) $("pRefPrimary").onclick = async () => { await makePrimaryReference(id); personSheet(kind, id); };
     $("pUse").onclick = () => { state.sel.selfie = kind === "model" ? null : (kind === "selfie" ? id : null); state.sel.model = kind === "model" ? id : (kind === "generation" ? "gen:" + id : null); closeSheet(); renderPickers(); showTab("tryon"); };
     if ($("pCut")) $("pCut").onclick = async () => {
@@ -1291,10 +1294,8 @@ const ReelEngine = (() => {
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
   };
   const itemLabel = (g) => shortName(g?.name) || (g?.brand || "").trim() || (g?.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : "Item");
-  // Which items belong on a public shop page. A saved name is required (blank names stay off). A publishable
-  // picture — a cutout, or the original when public_ok is set — is enough on its own, including "Link coming soon".
-  // A name plus an Amazon link is enough too: the original photo is not required, and it is never published without permission.
-  const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && (hasImage || (g.affiliate_url || "").trim()));
+  // Which items belong on a public shop page: a real saved name (no category placeholders) and a picture.
+  const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && hasImage);
   const linkedItems = (items) => (items || []).filter((g) => g && g.affiliate_url);
   const missingInfo = (items) => (items || []).filter((g) => g && (!(g.name || "").trim() || !g.affiliate_url));
   // Links list for captions: ONLY items that have a link. Unlinked or unnamed items are never printed as ": (no link)".
@@ -1394,45 +1395,50 @@ const ReelEngine = (() => {
   const SCENES = [["keep", "As in my photo", ""], ["studio", "Plain studio", "plain neutral studio backdrop with soft even lighting"], ["bedroom", "Bedroom / closet mirror", "a tidy bedroom or closet with a full-length mirror and soft daylight"],
     ["indoor", "Indoor lifestyle", "a bright indoor lifestyle setting such as a living room or café with natural window light"], ["outdoor", "Outdoor casual", "a casual outdoor street or park setting in daylight"], ["night", "Dressy / night out", "a dressy night-out setting with warm city lights in the evening"]];
   const optOf = (list, k) => list.find((x) => x[0] === k) || list[0];
-  const IDENTITY_PROMPT = "Photorealistic full-body photo of the exact same woman as the face reference. Keep her real facial features, skin tone, age, hair colour and natural body proportions; realistic body shape with no slimming, retouching or glamour makeover — she must be recognisably her, identity first, style second.";
+  const IDENTITY_PROMPT = "Photorealistic full-body photo of the exact same woman as the face reference. Her face must match the reference portrait closely: same facial features, face shape, eyes, nose, lips, skin tone and age — do not beautify, slim, retouch, add makeup or make her look younger or older; she must be recognisably her, identity first, style second.";
+  const BODY_PROMPT = "Use the second reference image only for her real build and body proportions; keep them exactly, and do not copy its pose, clothing or background.";
+  const NO_BODY_PROMPT = "Keep her natural body proportions realistic with no slimming or reshaping.";
   function identityPrompt(st) {
     const pose = optOf(POSES, st.pose)[2], hair = optOf(HAIRS, st.hair)[2], scene = optOf(SCENES, st.background)[2];
-    return [IDENTITY_PROMPT, pose ? `Pose: ${pose}.` : "Pose: natural and relaxed, similar to her photo.", hair ? `Hair: ${hair}.` : "Hair: her natural hairstyle as in the reference photo.",
+    return [IDENTITY_PROMPT, st.body_selfie_id ? BODY_PROMPT : NO_BODY_PROMPT, pose ? `Pose: ${pose}.` : "Pose: natural and relaxed, similar to her photo.", hair ? `Hair: ${hair}.` : "Hair: her natural hairstyle as in the reference photo.",
       scene ? `Scene: ${scene}.` : "Scene: similar to her photo, clean and uncluttered.",
       "She wears a plain fitted neutral top and simple neutral pants (the outfit is added afterwards). Full body including shoes, natural daylight-style realism, sharp focus, no text, no watermark."].join(" ");
   }
-  const styleKey = (st) => [st.ref_selfie_id, st.pose, st.hair, st.background, st.face_mode].join("|");
+  const styleKey = (st) => [st.ref_selfie_id, st.body_selfie_id || "", st.pose, st.hair, st.background, st.face_mode].join("|");
   const styleSummary = (st) => st ? [optOf(POSES, st.pose)[1], optOf(HAIRS, st.hair)[1], optOf(SCENES, st.background)[1]].filter((x) => x && x !== "As in my photo").join(" · ") : "";
   const fidelityLabel = (st) => st?.fidelity === "inspiration" ? "Get the look" : st?.fidelity === "exact" ? "Product preview" : "";
-  const refPhotos = () => state.selfies.filter((s) => s.is_reference).sort((a, b) => (a.ref_rank ?? 99) - (b.ref_rank ?? 99) || (a.created_at < b.created_at ? 1 : -1));
+  const refPhotos = (role) => state.selfies.filter((s) => s.is_reference && (!role || (s.ref_role || "face") === role)).sort((a, b) => (a.ref_rank ?? 99) - (b.ref_rank ?? 99) || (a.created_at < b.created_at ? 1 : -1));
+  const faceRefs = () => refPhotos("face"), bodyRefs = () => refPhotos("body");
   const refsSupported = () => state.selfies.length === 0 || "is_reference" in state.selfies[0];   // column exists once the Style Me migration is live
-  async function setReference(id, on) {
-    const refs = refPhotos();
-    if (on && refs.length >= REF_MAX && !refs.some((s) => s.id === id)) throw new Error(`Up to ${REF_MAX} reference photos — remove one first.`);
-    const { error } = await sb.from("selfies").update({ is_reference: on, ref_rank: on ? (refs.length ? Math.max(...refs.map((s) => s.ref_rank ?? 0)) + 1 : 1) : null }).eq("id", id).eq("user_id", state.uid);
+  async function setReference(id, on, role = "face") {
+    const refs = refPhotos(role);
+    if (on && refs.length >= REF_MAX && !refs.some((s) => s.id === id)) throw new Error(`Up to ${REF_MAX} ${role} reference photos — remove one first.`);
+    const patch = { is_reference: on, ref_rank: on ? (refs.length ? Math.max(...refs.map((s) => s.ref_rank ?? 0)) + 1 : 1) : null, ref_role: role };
+    let { error } = await sb.from("selfies").update(patch).eq("id", id).eq("user_id", state.uid);
+    if (error && /ref_role/.test(error.message)) { const { ref_role, ...legacy } = patch; ({ error } = await sb.from("selfies").update(legacy).eq("id", id).eq("user_id", state.uid)); }   // roles arrive with the next database update
     if (error) throw new Error(/is_reference/.test(error.message) ? "Reference photos need the Style Me database update first." : error.message);
     await loadAll();
   }
   async function makePrimaryReference(id) {
-    const order = [id, ...refPhotos().map((s) => s.id).filter((x) => x !== id)];
+    const me = state.selfies.find((s) => s.id === id), order = [id, ...refPhotos(me?.ref_role || "face").map((s) => s.id).filter((x) => x !== id)];
     for (let i = 0; i < order.length; i++) await sb.from("selfies").update({ ref_rank: i + 1 }).eq("id", order[i]).eq("user_id", state.uid);
     await loadAll();
   }
   function renderRefs() {
-    const el = $("refStrip"); if (!el) return; const refs = refPhotos();
-    el.innerHTML = refs.map((s, i) => `<button class="tile" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt="">${i === 0 ? '<span class="badge">primary</span>' : ""}<span class="cap">${esc(s.label || "Reference " + (i + 1))}</span></button>`).join("")
-      + (refs.length < REF_MAX ? `<button class="tile add" id="refAdd">+ Add</button>` : "");
-    $("refHint").textContent = refs.length ? `${refs.length} of ${REF_MAX}. The primary photo is used by default; you can pick another for any look.` : "Add 1–5 clear photos of yourself (face visible, good light). They are used to keep every styled picture recognisably you.";
-    $("refStyle").disabled = !refs.length;
-    el.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => personSheet("selfie", t.dataset.id));
-    if ($("refAdd")) $("refAdd").onclick = () => $("refFile").click();
-    fillImgs(el);
+    if (!$("refFaceStrip")) return; const faces = faceRefs(), bodies = bodyRefs();
+    const strip = (el, refs, addId, addLabel) => { el.innerHTML = refs.map((s, i) => `<button class="tile" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt="">${i === 0 ? '<span class="badge">primary</span>' : ""}<span class="cap">${esc(s.label || "Reference " + (i + 1))}</span></button>`).join("") + (refs.length < REF_MAX ? `<button class="tile add" id="${addId}">${addLabel}</button>` : ""); el.querySelectorAll(".tile[data-id]").forEach((t) => t.onclick = () => personSheet("selfie", t.dataset.id)); fillImgs(el); };
+    strip($("refFaceStrip"), faces, "refFaceAdd", "+ Portrait"); strip($("refBodyStrip"), bodies, "refBodyAdd", "+ Full-body");
+    $("refHint").textContent = faces.length ? "The primary portrait is the face used in every styled picture; the primary full-length photo guides your natural proportions. Pick different ones for any look." : "Add one clear close-up portrait (face straight to the camera, good light, nothing covering your face) — it is what keeps styled pictures recognisably you. Full-length photos guide your natural proportions.";
+    $("refStyle").disabled = !(faces.length || bodies.length || state.selfies.length);
+    if ($("refFaceAdd")) $("refFaceAdd").onclick = () => $("refFaceFile").click();
+    if ($("refBodyAdd")) $("refBodyAdd").onclick = () => $("refBodyFile").click();
   }
-  $("refFile").addEventListener("change", async (e) => {
-    try { for (const f of [...e.target.files].slice(0, REF_MAX - refPhotos().length)) { const id = await addSelfieFromBlob(f, "Reference"); await setReference(id, true); } }
+  const addRefs = (role) => async (e) => {
+    try { for (const f of [...e.target.files].slice(0, REF_MAX - refPhotos(role).length)) { const id = await addSelfieFromBlob(f, role === "face" ? "Portrait" : "Full-body"); await setReference(id, true, role); } }
     catch (err) { alert(err.message); }
     e.target.value = "";
-  });
+  };
+  $("refFaceFile").addEventListener("change", addRefs("face")); $("refBodyFile").addEventListener("change", addRefs("body"));
   $("refStyle").onclick = () => {
     const outfits = state.outfits.filter((o) => o.items.map(garment).filter((g) => g && !isApi(g)).length);
     if (!outfits.length) { alert("Create an outfit with your own clothing photos first (Outfits tab)."); return; }
@@ -1441,14 +1447,16 @@ const ReelEngine = (() => {
   };
   function styleMeSheet(o, items) {
     const p = state.me.presets; const pc = (k) => p[k].credits;
-    const refs = refPhotos(), others = state.selfies.filter((s) => !s.is_reference);
-    const st = { ref_selfie_id: refs[0]?.id || others[0]?.id || null, pose: "keep", hair: "keep", background: "keep", face_mode: "match_base", fidelity: "inspiration" };
+    const faces = faceRefs(), bodies = bodyRefs(), others = state.selfies.filter((s) => !s.is_reference);
+    const st = { ref_selfie_id: faces[0]?.id || bodies[0]?.id || others[0]?.id || null, body_selfie_id: bodies[0]?.id || null, pose: "keep", hair: "keep", background: "keep", face_mode: "match_base", fidelity: "inspiration" };
     let baseMode = "fast", reuse = null;
     const chips = (id, list, key) => `<div class="chips" id="${id}">${list.map(([k, l]) => `<button class="chip ${st[key] === k ? "on" : ""}" data-k="${k}">${l}</button>`).join("")}</div>`;
     openSheet(`<h3>Style me: ${esc(o.name)}</h3>
       <p class="hint">A new picture of you in this outfit. Your face comes from a reference photo; pose, hair and scene can change. The collage stays the exact shoppable reference.</p>
       <div class="stack">
-        <div><label>Reference photo (identity)</label><div class="strip" id="smRef">${[...refs, ...others].map((s) => `<button class="tile ${s.id === st.ref_selfie_id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt="">${s.is_reference ? '<span class="badge">ref</span>' : ""}</button>`).join("") || '<div class="empty">Add a photo of yourself under My Models first.</div>'}</div></div>
+        <div><label>Face reference (identity)</label><div class="strip" id="smRef">${[...faces, ...bodies, ...others].map((s) => `<button class="tile ${s.id === st.ref_selfie_id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt="">${s.is_reference ? `<span class="badge">${(s.ref_role || "face") === "body" ? "body" : "face"}</span>` : ""}</button>`).join("") || '<div class="empty">Add a photo of yourself under My Models first.</div>'}</div>
+          ${faces.length ? "" : '<p class="kv" style="color:var(--danger)">No close-up portrait yet — likeness is better with one. Add it under My Models → My Reference Photos.</p>'}</div>
+        <div><label>Body reference (proportions)</label><div class="strip" id="smBody"><button class="tile add ${st.body_selfie_id ? "" : "sel"}" data-id="">None</button>${bodies.map((s) => `<button class="tile ${s.id === st.body_selfie_id ? "sel" : ""}" data-id="${s.id}"><img data-path="${esc(s.thumb_path || s.path)}" alt=""></button>`).join("")}</div><p class="kv">Guides your natural build only; pose, clothes and background still follow the choices below.</p></div>
         <div><label>Pose</label>${chips("smPose", POSES, "pose")}</div>
         <div><label>Hairstyle</label>${chips("smHair", HAIRS, "hair")}</div>
         <div><label>Background</label>${chips("smScene", SCENES, "background")}</div>
@@ -1463,6 +1471,7 @@ const ReelEngine = (() => {
     const pick = (id, key) => $(id).querySelectorAll(".chip").forEach((c) => c.onclick = () => { st[key] = c.dataset.k; $(id).querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
     pick("smPose", "pose"); pick("smHair", "hair"); pick("smScene", "background"); pick("smFace", "face_mode"); pick("smFid", "fidelity");
     $("smRef").querySelectorAll(".tile").forEach((t) => t.onclick = () => { st.ref_selfie_id = t.dataset.id; $("smRef").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); refresh(); });
+    $("smBody").querySelectorAll(".tile").forEach((t) => t.onclick = () => { st.body_selfie_id = t.dataset.id || null; $("smBody").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); refresh(); });
     $("smBase").querySelectorAll(".chip").forEach((c) => c.onclick = () => { baseMode = c.dataset.m; $("smBase").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
     $("smPreset").onchange = () => refresh();
     const baseCredits = () => baseMode === "reuse" ? 0 : cost(baseMode === "fast" ? "model_fast" : "model_balanced") + cost("face_reference");
@@ -1484,13 +1493,14 @@ const ReelEngine = (() => {
         if (!base) {
           note("smMsg", "Making the base picture of you…");
           const name = `Me · ${[optOf(POSES, st.pose)[1], optOf(HAIRS, st.hair)[1], optOf(SCENES, st.background)[1]].filter((x) => x !== "As in my photo").join(" · ") || "as in my photo"}`.slice(0, 80);
-          const r = await runAndWait("/model-create", { prompt: identityPrompt(st), mode: baseMode, name, face_path: ref.path, kind: "ai_self", scene: "natural", face_mode: st.face_mode,
-            style: { pose: st.pose, hair: st.hair, background: st.background, face_mode: st.face_mode, ref_selfie_id: st.ref_selfie_id } }, (t) => note("smMsg", "Base: " + t));
+          const body = st.body_selfie_id ? state.selfies.find((s) => s.id === st.body_selfie_id) : null;
+          const r = await runAndWait("/model-create", { prompt: identityPrompt(st), mode: baseMode, name, face_path: ref.path, body_path: body?.path, kind: "ai_self", scene: "natural", face_mode: st.face_mode,
+            style: { pose: st.pose, hair: st.hair, background: st.background, face_mode: st.face_mode, ref_selfie_id: st.ref_selfie_id, body_selfie_id: st.body_selfie_id || undefined } }, (t) => note("smMsg", "Base: " + t));
           base = r; used += r.credits;
           $("smSteps").insertAdjacentHTML("beforeend", `<div class="tile"><img data-path="${esc(r.path)}" alt=""><span class="cap">Base · you</span></div>`); fillImgs($("smSteps"));
           if (!confirm(`Base picture ready (${r.credits} credits). Does it look like you? Continue with the outfit (${per * items.length} credits), or Cancel to keep just the base under My Models → AI me.`)) { note("smMsg", `Stopped after the base — ${used} credits. It is saved under My Models → AI me.`); loadAll(); $("smGo").disabled = false; return; }
         }
-        const meta = { model_id: base.model_id, outfit_id: o.id, selfie_id: null, style: { pose: st.pose, hair: st.hair, background: st.background, fidelity: st.fidelity, base_model_id: base.model_id, ref_selfie_id: st.ref_selfie_id } };
+        const meta = { model_id: base.model_id, outfit_id: o.id, selfie_id: null, style: { pose: st.pose, hair: st.hair, background: st.background, fidelity: st.fidelity, base_model_id: base.model_id, ref_selfie_id: st.ref_selfie_id, body_selfie_id: st.body_selfie_id || undefined } };
         let prev = base.path, last = null;
         for (let i = 0; i < items.length; i++) {
           const g = items[i]; note("smMsg", `Item ${i + 1}/${items.length}: ${itemLabel(g)}…`);
@@ -1582,7 +1592,7 @@ const ReelEngine = (() => {
   $("colDelSel").onclick = () => deleteCollages([...colSel]);
   function collageMenu(id) {
     const c = state.collages.find((x) => x.id === id); if (!c) return;
-    const sp = shopOf(c.id), mode = MODES[c.layout?.mode || "clothing"] || "Collage", items = (c.layout?.layers || []).filter((l) => l.kind === "item").length;
+    const sp = shopOf(c.id), mode = MODES[c.layout?.mode || "clothing"] || "Collage", items = layoutGarments(c.layout, c.outfit_id).length;
     openSheet(`<h3>${esc(c.name)}</h3>
       <p class="kv" style="margin:0 0 10px">${esc(mode)} · ${items} item${items === 1 ? "" : "s"} · ${c.preview_path ? "saved " + esc(new Date(c.updated_at).toLocaleString()) : "never saved (opened " + esc(new Date(c.created_at).toLocaleString()) + ")"}${sp?.published ? " · Shop page published" : ""}</p>
       <div class="stack"><button class="btn" id="cmOpen">Open</button>
@@ -1659,7 +1669,14 @@ const ReelEngine = (() => {
     $("editor").classList.remove("hidden"); document.body.style.overflow = "hidden";
     await preloadImgs(); renderStatic(); draw();
   }
-  const layerSrc = (l) => { if (l.kind === "item") { const g = garment(l.g); return g && !isApi(g) ? (g.cutout_path || g.path) : null; } if (l.kind === "person") return l.path; return null; };
+  const layerSrc = (l) => { if (l.kind === "item") { const g = garment(l.g); return g && !isApi(g) ? (g.cutout_path || g.path) : null; } if (l.kind === "person" || l.kind === "image") return l.path; return null; };
+  // Garments a collage stands for: its item layers, or — for an outfit collage that is a single finished picture
+  // (kind "image", no item layers) — the outfit's own items, so captions, links and Amazon tagging stay complete.
+  function layoutGarments(layout, outfitId) {
+    const fromLayers = [...new Set((layout?.layers || []).filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
+    if (fromLayers.length || !outfitId) return fromLayers;
+    const o = state.outfits.find((x) => x.id === outfitId); return o ? o.items.map(garment).filter(Boolean) : [];
+  }
   async function preloadImgs() {
     for (const l of ed.layout.layers) { const p = layerSrc(l); if (p && !ed.imgs[p]) ed.imgs[p] = await blobUrl(p); }
   }
@@ -1727,7 +1744,7 @@ const ReelEngine = (() => {
     renderLinks();
   }
   function isDark(bg) { if (designOf(bg)) return !!designOf(bg).dark; if (!/^#/.test(bg)) return false; const n = parseInt(bg.slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 110; }
-  function collageItems() { return [...new Set(ed.layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean); }
+  function collageItems() { return layoutGarments(ed.layout, ed.c?.outfit_id); }
   // Items & links panel: every item on the collage with its Amazon link in an editable field. Links and names live on the
   // clothing item itself (garments table), so a link added here also shows in My Clothing, Shop pages and captions.
   // Links are never invented: an empty field stays empty and is flagged.
@@ -1812,7 +1829,7 @@ const ReelEngine = (() => {
     if (!l) { t.innerHTML = `<span class="kv" style="padding:8px 2px">Tap a layer to move it · drag · pinch to resize & rotate</span>`; return; }
     const common = `<button class="btn secondary small" data-a="smaller">− Size</button><button class="btn secondary small" data-a="bigger">+ Size</button>
       <button class="btn secondary small" data-a="rotl">⟲ 15°</button><button class="btn secondary small" data-a="rotr">⟳ 15°</button><button class="btn secondary small" data-a="straight">Straighten</button>
-      <button class="btn secondary small" data-a="front">Front</button><button class="btn secondary small" data-a="back">Back</button>${l.kind !== "person" ? '<button class="btn secondary small" data-a="dup">Duplicate</button>' : ""}${l.kind === "item" ? '<button class="btn secondary small" data-a="swap">Swap item</button>' : ""}`;
+      <button class="btn secondary small" data-a="front">Front</button><button class="btn secondary small" data-a="back">Back</button>${l.kind !== "person" && l.kind !== "image" ? '<button class="btn secondary small" data-a="dup">Duplicate</button>' : ""}${l.kind === "item" ? '<button class="btn secondary small" data-a="swap">Swap item</button>' : ""}`;
     const text = l.kind === "text" ? `<button class="btn secondary small" data-a="edit">Edit text</button><button class="btn secondary small" data-a="font">${l.font === "serif" ? "Sans" : "Serif"}</button>
       <label class="btn secondary small" style="margin:0">Color<input type="color" id="txtColor" value="${l.color}" style="width:22px;height:22px;border:0;background:none;padding:0"></label>` : "";
     t.innerHTML = common + text + `<button class="btn danger small" data-a="remove">${l.kind === "item" ? "Remove from collage" : "Remove"}</button>`;
@@ -1918,7 +1935,8 @@ const ReelEngine = (() => {
       if (error) throw new Error(error.message);
       if (ed.c._draft) ed.c = { ...ed.c, ...row, _draft: false };
       ed.dirty = false; note("edMsg", "Saved.");
-      if (ed.c.outfit_id) {   // every saved outfit collage has its own Shop This Look page, kept in step with the collage
+      if (ed.c.outfit_id && !ed.layout.layers.some((l) => l.kind === "item")) note("edMsg", "Saved. The Shop This Look page was left unchanged (use Share / Publish → Update shop page to make this picture its cover).");
+      else if (ed.c.outfit_id) {   // every saved outfit collage has its own Shop This Look page, kept in step with the collage
         try { note("edMsg", "Saved. Updating the Shop This Look page…"); const sp = await publishShopFor({ ...ed.c, name }, ed.layout, {}); note("edMsg", "Saved. Shop This Look page is up to date: " + shopLink(sp)); renderLinks(); }
         catch (e) { note("edMsg", "Saved, but the Shop This Look page could not be updated: " + e.message, true); }
       }
@@ -1973,17 +1991,6 @@ const ReelEngine = (() => {
   const shopOfOutfit = (outfitId) => outfitId ? (state.shops.find((p) => p.outfit_id === outfitId) || state.shops.find((p) => { const c = state.collages.find((x) => x.id === p.collage_id); return c && c.outfit_id === outfitId; }) || null) : null;
   const shopFor = (c) => (c.outfit_id && shopOfOutfit(c.outfit_id)) || shopOf(c.id) || null;
   const shopLink = (sp) => SHOP_BASE + sp.slug;
-  // Owner-uploaded shop photo lives beside collage.jpg. The filename is the flag — no extra column.
-  const isCustomHeroPath = (p) => /\/custom\.jpg$/i.test(String(p || ""));
-  // Decide the shop page's main image. "custom" uploads or keeps custom.jpg; "collage" (or a page that never had one)
-  // uses the auto-rendered collage. Republish with no hero option keeps a custom image already in use.
-  function resolveShopHero(prevPath, opts) {
-    const keepCustom = opts.hero === "custom" || (opts.hero !== "collage" && isCustomHeroPath(prevPath));
-    if (!keepCustom) return { custom: false, upload: false, dropCustom: isCustomHeroPath(prevPath) };
-    if (opts.heroBlob) return { custom: true, upload: true, dropCustom: false };
-    if (isCustomHeroPath(prevPath)) return { custom: true, upload: false, dropCustom: false };
-    return { error: "Choose an image to use as the shop page photo, or switch to Auto collage." };
-  }
   async function uploadPublic(path, blob) { const { error } = await sb.storage.from("shop").upload(path, blob, { contentType: blob.type, upsert: true }); if (error) throw new Error(error.message); }
   // Tappable areas on the published collage image: one rectangle per clothing item, in 0–1 collage coordinates.
   async function layoutHotspots(layout) {
@@ -1994,33 +2001,22 @@ const ReelEngine = (() => {
     }
     return out;
   }
-  // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = main image + item images we are
-  // allowed to show + item list (name, link, hotspot). Unlinked items with a picture are included as "Link coming soon".
-  // Named items with a link are included even with no publishable photo. A custom main image (custom.jpg) replaces the
-  // auto collage; hotspots are omitted then because they only match the collage layout.
+  // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = collage image + item images in the
+  // public bucket + item list (name, link, hotspot). Unlinked items are included and shown as "Link coming soon".
   async function publishShopFor(c, layout, opts = {}) {
-    const itemsIn = [...new Set((layout.layers || []).filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
+    const itemsIn = layoutGarments(layout, c.outfit_id);   // a picture-only outfit collage publishes the outfit's items (no hotspots)
     const sp = shopFor(c);
     const slug = sp?.slug || Math.random().toString(36).slice(2, 12), base = `${state.uid}/${slug}`;
-    const prev = sp || {};
-    const autoPath = `${base}/collage.jpg`, customPath = `${base}/custom.jpg`;
-    await uploadPublic(autoPath, await renderLayout(layout, 1080));   // homepage cover still falls back to this file
-    const heroPick = resolveShopHero(prev.collage_public_path, opts);
-    if (heroPick.error) throw new Error(heroPick.error);
-    let collage_public_path = autoPath;
-    if (heroPick.custom) {
-      if (heroPick.upload) { const blob = await shrink(opts.heroBlob, 1080, "image/jpeg", 0.9); if (!blob) throw new Error("That image could not be read. Try a JPG or PNG."); await uploadPublic(customPath, blob); }
-      collage_public_path = customPath;
-    } else if (heroPick.dropCustom) await sb.storage.from("shop").remove([prev.collage_public_path]);
-    const spots = heroPick.custom ? {} : await layoutHotspots(layout);   // tap areas only match the auto collage
-    // Public list: a saved name. Blank names are left off (they stay in the Studio). A cutout, or an original the owner
-    // marked public_ok, is copied into the shop bucket. Otherwise a named item with an Amazon link is listed with no
-    // picture — the original photo is never uploaded. Category placeholders are hidden by the shop page, as before.
+    await uploadPublic(`${base}/collage.jpg`, await renderLayout(layout, 1080));
+    const spots = await layoutHotspots(layout);
+    // Public list: only real products — a saved name (no "Tops"/"Accessory" placeholders) and a picture. Items without a
+    // name or picture are left off the page (they stay in the Studio untouched); a named item without a link shows as
+    // "Link coming soon".
     const items = [];
     for (const g of itemsIn) {
       if (!(g.name || "").trim()) continue;
       const common = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: spots[g.id] || null };
-      if (isApi(g)) { if (!shopEligible(g, !!g.image_url)) continue; items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
+      if (isApi(g)) { if (!g.image_url) continue; items.push({ ...common, image_path: null, image_url: g.image_url, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
       let image_path = null;
       const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
       if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
@@ -2029,13 +2025,13 @@ const ReelEngine = (() => {
     }
     // Homepage cover: the outfit's AI photo (the photo set as outfit cover) by default, the collage when chosen or when
     // there is no photo. Always a plain copy of an existing image — publishing never generates anything or spends credits.
-    const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
+    const prev = sp || {}; const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
     const coverSource = opts.cover_source || prev.cover_source || "photo";
     const hero = o ? state.generations.find((g) => g.id === o.hero_generation_id) : null;
     let cover_public_path = `${base}/collage.jpg`;
     if (coverSource === "photo" && hero) { try { await uploadPublic(`${base}/cover.jpg`, await shrink(await blobOf(hero.path), 1080, "image/jpeg", 0.88)); cover_public_path = `${base}/cover.jpg`; } catch (e) { console.warn("cover copy failed, using collage", e); } }
     const row = { collage_id: c.id, outfit_id: c.outfit_id || null, slug, title: opts.title || prev.title || c.name || "This outfit", caption: opts.caption !== undefined ? (opts.caption || null) : (prev.caption ?? null),
-      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path, items, published: true, updated_at: new Date().toISOString(),
+      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path: `${base}/collage.jpg`, items, published: true, updated_at: new Date().toISOString(),
       listed: prev.listed ?? true, featured: prev.featured ?? false, sort_order: prev.sort_order ?? 0, category: opts.category !== undefined ? opts.category : (prev.category ?? null),
       cover_source: coverSource, cover_public_path, storefront_url: state.settings.amazon_storefront_url || null };
     const write = (r) => sp ? sb.from("shop_pages").update(r).eq("id", sp.id).eq("user_id", state.uid) : sb.from("shop_pages").insert(r);
@@ -2047,6 +2043,7 @@ const ReelEngine = (() => {
   }
   // Homepage management helpers (all plain row updates on the owner's own shop pages — no rendering, no credits).
   const SHOP_HOME = SHOP_BASE.replace(/\?o=$/, "");
+  const fromStudio = (link) => { const u = new URL(link); u.searchParams.set("from", "studio"); return u.toString(); };   // shop.html shows "‹ Back to Studio" when opened this way
   const ABOUT_DEFAULT = "ClosetIQ is a separate AI wardrobe and personal styling app that helps you organize your closet, create outfits from clothes you already own, and discover personalized styling ideas.";
   const SHOP_CATEGORIES = ["Everyday Casual", "Workwear", "Date Night", "Going Out", "Vacation", "Athleisure"];
   const pubUrl = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
@@ -2159,8 +2156,8 @@ const ReelEngine = (() => {
   $("storeManage").addEventListener("click", () => shopHomeSheet("looks"));
   $("storeView").addEventListener("click", () => openShopPreview(SHOP_HOME));
   $("storeCopy").addEventListener("click", () => copyText(SHOP_HOME, "storeMsg"));
-  $("storeOpenTab").href = SHOP_HOME; $("storeUrl").textContent = SHOP_HOME;
-  async function publishShop(caption, extra = {}) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title, hero: extra.hero, heroBlob: extra.heroBlob || null }); }
+  $("storeOpenTab").href = fromStudio(SHOP_HOME); $("storeUrl").textContent = SHOP_HOME;
+  async function publishShop(caption) { return publishShopFor(ed.c, ed.layout, { caption, title: captionCtx().title }); }
   // Keep published pages in sync after a product edit: every live page whose collage contains the item is re-published.
   async function syncShopPagesForGarment(gid) {
     const done = new Set(); let n = 0;
@@ -2185,7 +2182,7 @@ const ReelEngine = (() => {
   // Published Shop pages open INSIDE the Studio (iframe overlay) with a Back to Studio button; the editor stays untouched.
   function openShopPreview(link) {
     const u = new URL(link); u.searchParams.set("from", "studio"); u.searchParams.set("embed", "1");
-    $("spvFrame").src = u.toString(); $("spvUrl").textContent = link; $("spvOpen").href = link; $("shopPreview").classList.remove("hidden");
+    $("spvFrame").src = u.toString(); $("spvUrl").textContent = link; $("spvOpen").href = fromStudio(link); $("shopPreview").classList.remove("hidden");
   }
   $("spvClose").onclick = () => { $("shopPreview").classList.add("hidden"); $("spvFrame").src = "about:blank"; };
   $("edShare").onclick = async () => { if (ed.c._draft || ed.dirty) { if (!confirm(ed.c._draft ? "Save the collage first? Sharing and publishing need a saved collage." : "Save the collage first?")) return; await $("edSave").onclick(); if (ed.c._draft || ed.dirty) return; } shareSheet(); };
@@ -2200,17 +2197,7 @@ const ReelEngine = (() => {
       <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="capSelect">Select all</button><button class="btn secondary small" id="capCopy">Copy caption</button><button class="btn secondary small" id="capLinks">Copy all links</button></div>
       <p class="kv">You can edit the caption above before copying or posting — press and hold to select, or tap Select all.</p>
       <hr style="border:0;border-top:1px solid var(--line)">
-      <div class="kv">${sp?.published ? `Shop page is live: <a href="${esc(shopLink(sp))}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(shopLink(sp))}</a>` : "Shop page not published yet."}</div>
-      <div><label>Shop page photo</label>
-        <div class="chips" id="shHero"><button class="chip" data-hero="collage">Auto collage</button><button class="chip" data-hero="custom">Use my own image</button></div>
-        <div id="shHeroBox" class="stack hidden" style="margin-top:8px">
-          <img id="shHeroPrev" alt="Shop page photo preview" class="big" style="max-height:220px;object-fit:contain;background:#fff;display:none">
-          <button class="btn secondary" id="shHeroPick">Choose image</button>
-          <p class="kv" id="shHeroNote" style="margin:0"></p>
-        </div>
-        <input id="shHeroFile" type="file" accept="image/*" class="hidden">
-      </div>
-      <p class="kv">Items with a name and an Amazon link are listed even when their original photo is not published. Photos are only copied when the item has a cutout, or you have ticked permission on the item.</p>
+      <div class="kv">${sp?.published ? `Shop page is live: <a href="${esc(fromStudio(shopLink(sp)))}" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">${esc(shopLink(sp))}</a>` : "Shop page not published yet."}</div>
       <div class="row"><button class="btn" id="shPublish">${sp?.published ? "Update shop page" : "Publish shop page"}</button>${sp?.published ? '<button class="btn secondary" id="shUnpub">Unpublish</button>' : ""}</div>
       ${sp?.published ? '<div class="row"><button class="btn secondary small" id="shCopyLink">Copy link</button><a class="btn secondary small" id="shOpen" target="_blank" rel="noopener">Open page</a></div>' : ""}
       <hr style="border:0;border-top:1px solid var(--line)">
@@ -2228,29 +2215,7 @@ const ReelEngine = (() => {
     $("capRegen").onclick = regen; regen();
     $("capCopy").onclick = () => copyText($("capText").value, "shMsg"); $("capSelect").onclick = () => selectAllText($("capText"));
     $("capLinks").onclick = () => copyText(linksText(ctx.title, "", ctx.items), "shMsg");
-    let heroMode = isCustomHeroPath(sp?.collage_public_path) ? "custom" : "collage", heroFile = null, heroPreviewUrl = "";
-    const paintHero = () => {
-      $("shHero").querySelectorAll("[data-hero]").forEach((b) => b.classList.toggle("on", b.dataset.hero === heroMode));
-      $("shHeroBox").classList.toggle("hidden", heroMode !== "custom");
-      const prev = $("shHeroPrev");
-      if (heroPreviewUrl) { URL.revokeObjectURL(heroPreviewUrl); heroPreviewUrl = ""; }
-      const src = heroMode !== "custom" ? "" : heroFile ? (heroPreviewUrl = URL.createObjectURL(heroFile)) : (isCustomHeroPath(sp?.collage_public_path) ? pubUrl(sp.collage_public_path) + "?v=" + encodeURIComponent(sp.updated_at || "") : "");
-      prev.style.display = src ? "block" : "none"; if (src) prev.src = src;
-      $("shHeroPick").textContent = heroFile || isCustomHeroPath(sp?.collage_public_path) ? "Change image" : "Choose image";
-      $("shHeroNote").textContent = heroFile ? "This photo replaces the collage on the shop page. Product links stay in the list. Tap areas on the photo are off."
-        : isCustomHeroPath(sp?.collage_public_path) ? "Update keeps this photo. Choose a new file to replace it, or switch to Auto collage. Tap areas on the photo stay off."
-        : "Choose a photo to use instead of the collage. Every product link still appears in the list. Tap areas on the photo are off.";
-    };
-    $("shHero").onclick = (e) => { const b = e.target.closest("[data-hero]"); if (!b) return; heroMode = b.dataset.hero; paintHero(); };
-    $("shHeroPick").onclick = () => $("shHeroFile").click();
-    $("shHeroFile").onchange = () => { const f = $("shHeroFile").files && $("shHeroFile").files[0]; if (!f) return; heroFile = f; heroMode = "custom"; paintHero(); };
-    paintHero();
-    $("shPublish").onclick = async () => {
-      if (heroMode === "custom" && !heroFile && !isCustomHeroPath(sp?.collage_public_path)) { note("shMsg", "Choose an image first, or switch to Auto collage.", true); return; }
-      $("shPublish").disabled = true; note("shMsg", "Publishing…");
-      try { const p = await publishShop($("capText").value, { hero: heroMode, heroBlob: heroMode === "custom" ? heroFile : null }); note("shMsg", "Live at " + shopLink(p)); shareSheet(); }
-      catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; }
-    };
+    $("shPublish").onclick = async () => { $("shPublish").disabled = true; note("shMsg", "Publishing…"); try { const p = await publishShop($("capText").value); note("shMsg", "Live at " + shopLink(p)); shareSheet(); } catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; } };
     if (sp?.published) {
       $("shUnpub").onclick = async () => { if (!confirm("Unpublish this shop page? The link will stop working.")) return; await unpublishShop(sp); shareSheet(); };
       $("shCopyLink").onclick = () => copyText(shopLink(sp), "shMsg"); $("shOpen").href = shopLink(sp); $("shOpen").onclick = (e) => { e.preventDefault(); openShopPreview(shopLink(sp)); };
@@ -2328,7 +2293,7 @@ const ReelEngine = (() => {
   function amazonShareSheet(c, layout) {
     if (!layout?.layers) { alert("Open the collage and save it once first."); return; }
     const title = (c?.name || "Collage").trim();
-    const items = [...new Set(layout.layers.filter((l) => l.kind === "item").map((l) => l.g))].map(garment).filter(Boolean);
+    const items = layoutGarments(layout, c?.outfit_id);
     const linked = linkedItems(items), unlinked = items.filter((g) => !g.affiliate_url);
     const people = peopleInLayout(layout), hasAi = people.some((p) => p.kind === "ai"), hasEdited = people.some((p) => p.kind === "edited");
     const hasText = layout.layers.some((l) => l.kind === "text");
