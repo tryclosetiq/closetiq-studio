@@ -2223,13 +2223,31 @@ const ReelEngine = (() => {
     }
     return out;
   }
+  // A picture may be copied to the public shop bucket only from a cutout, or from the original when public_ok is already
+  // set. This never changes public_ok and never uploads the original without that permission.
+  const publishableSrc = (g) => !g || isApi(g) ? null : (g.cutout_path || (g.public_ok ? g.path : null));
+  // Every product the outfit's one shop page should list: the outfit's saved pieces, anything already on its shop
+  // snapshot (so a short outfit row does not drop links that are only on the page), and the collage's own items.
+  // Order stays the published order when that list already covers the outfit. Nothing here is written.
+  function shopProductIds(layout, outfitId) {
+    const outfitIds = (outfitId && state.outfits.find((x) => x.id === outfitId)?.items) || [];
+    const shopIds = ((outfitId && shopOfOutfit(outfitId)?.items) || []).map((it) => it.garment_id).filter(Boolean);
+    const layerIds = layout?.imported
+      ? (layout.items || [])
+      : [...new Set((layout?.layers || []).filter((l) => l.kind === "item").map((l) => l.g))];
+    const ids = (shopIds.length && outfitIds.every((id) => shopIds.includes(id))) ? [...shopIds] : [...outfitIds];
+    [...layerIds, ...shopIds, ...outfitIds].forEach((id) => { if (id && !ids.includes(id)) ids.push(id); });
+    return ids;
+  }
+  const shopProducts = (layout, outfitId) => shopProductIds(layout, outfitId).map((id) => linkedGarment(id, outfitId)).filter(Boolean);
   // Publish or refresh the Shop This Look page for a collage (and its outfit). Snapshot = main image + item images we are
   // allowed to show + item list (name, link, hotspot). Unlinked items with a picture are included as "Link coming soon".
   // Named items with a link are included even with no publishable photo. A custom main image (custom.jpg) replaces the
   // auto collage; hotspots are omitted then because they only match the collage layout. An imported collage is copied
-  // byte-for-byte (renderLayout returns the stored file). Import itself does not call this.
+  // byte-for-byte (renderLayout returns the stored file). Import itself does not call this. The product list is the
+  // whole outfit, not only the layers on the canvas.
   async function publishShopFor(c, layout, opts = {}) {
-    const itemsIn = layoutGarments(layout, c.outfit_id);   // picture-only and imported collages publish the outfit's items
+    const itemsIn = shopProducts(layout, c.outfit_id);
     const sp = shopFor(c);
     const slug = sp?.slug || Math.random().toString(36).slice(2, 12), base = `${state.uid}/${slug}`;
     const prev = sp || {};
@@ -2276,6 +2294,56 @@ const ReelEngine = (() => {
     for (let i = 0; error && i < 10; i++) { const m = /'([a-z_]+)' column/i.exec(error.message) || /column "?([a-z_]+)"?/i.exec(error.message); if (!m || !(m[1] in row)) break; delete row[m[1]]; ({ error } = await write(row)); }
     if (error) throw new Error(error.message);
     await loadAll(); return shopFor(c);
+  }
+  // True when the published product list is missing a saved piece, still shows an old name or link, or is missing a
+  // picture we are already allowed to show. Compared in memory; this does not write.
+  function shopSnapshotStale(sp, products) {
+    const want = (products || []).filter((g) => shopEligible(g, !!(publishableSrc(g) || (isApi(g) && g.image_url))));
+    const have = sp?.items || [];
+    if (want.length !== have.length) return true;
+    return want.some((g) => {
+      const it = have.find((x) => x.garment_id === g.id);
+      if (!it) return true;
+      if ((it.url || "") !== (g.affiliate_url || "")) return true;
+      if ((it.full_name || it.name || "") !== (g.name || "")) return true;
+      const allowed = !!(publishableSrc(g) || (isApi(g) && g.image_url));
+      return allowed !== !!(it.image_path || it.image_url);
+    });
+  }
+  // Bring an existing shop page's product list up to the saved outfit. The collage file, cover, title and slug stay
+  // as they are — this does not redraw the collage. Item pictures follow publishableSrc. Garments are not updated.
+  async function writeShopItems(sp, products) {
+    const base = `${state.uid}/${sp.slug}`;
+    const prevById = Object.fromEntries((sp.items || []).map((it) => [it.garment_id, it]));
+    const items = [];
+    for (const g of products) {
+      if (!(g.name || "").trim()) continue;
+      const prev = prevById[g.id] || {};
+      const common = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: prev.hotspot || null };
+      if (isApi(g)) { if (!shopEligible(g, !!g.image_url)) continue; items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
+      const src = publishableSrc(g);
+      let image_path = src && prev.image_path ? prev.image_path : null;
+      if (src && !image_path) {
+        const png = String(src).endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85);
+        if (blob) { image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
+      }
+      if (!src) image_path = null;
+      if (!shopEligible(g, !!image_path)) continue;
+      items.push({ ...common, image_path });
+    }
+    const { error } = await sb.from("shop_pages").update({ items, disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid);
+    if (error) throw new Error(error.message);
+    await loadAll(); return shopFor({ id: sp.collage_id, outfit_id: sp.outfit_id }) || shopOf(sp.collage_id);
+  }
+  // One shoppable page per outfit. An existing page keeps its collage and only refreshes products when the snapshot
+  // is behind the saved items. A missing page is created with the current collage (the first time needs that image).
+  async function ensureShopPage(c, layout) {
+    if (!c) throw new Error("Save a collage for this outfit first.");
+    const products = shopProducts(layout || c.layout, c.outfit_id);
+    const sp = shopFor(c);
+    if (!sp) return publishShopFor(c, layout || c.layout, {});
+    if (!shopSnapshotStale(sp, products)) return sp;
+    return writeShopItems(sp, products);
   }
   // Homepage management helpers (all plain row updates on the owner's own shop pages — no rendering, no credits).
   const SHOP_HOME = SHOP_BASE.replace(/\?o=$/, "");
@@ -2421,8 +2489,10 @@ const ReelEngine = (() => {
     $("spvFrame").src = u.toString(); $("spvUrl").textContent = link; $("spvOpen").href = fromStudio(link); $("shopPreview").classList.remove("hidden");
   }
   $("spvClose").onclick = () => { $("shopPreview").classList.add("hidden"); $("spvFrame").src = "about:blank"; };
-  $("edShare").onclick = async () => { if (ed.c._draft || ed.dirty) { if (!confirm(ed.c._draft ? "Save the collage first? Sharing and publishing need a saved collage." : "Save the collage first?")) return; await $("edSave").onclick(); if (ed.c._draft || ed.dirty) return; } shareSheet(); };
-  function shareSheet() {
+  $("edShare").onclick = async () => { if (ed.c._draft || ed.dirty) { if (!confirm(ed.c._draft ? "Save the collage first? Sharing and publishing need a saved collage." : "Save the collage first?")) return; await $("edSave").onclick(); if (ed.c._draft || ed.dirty) return; } await shareSheet(); };
+  async function shareSheet(opts = {}) {
+    let ensureError = null;
+    if (opts.ensure !== false && ed.c && !ed.c._draft) { try { await ensureShopPage(ed.c, ed.layout); } catch (e) { ensureError = e; } }
     const sp = shopFor(ed.c); const ctx = { ...captionCtx(), shop_url: sp?.published ? shopLink(sp) : "" }; let platform = "instagram", tone = "casual";
     const miss = missingInfo(ctx.items);
     openSheet(`<h3>Share / Publish</h3><div class="stack">
@@ -2445,7 +2515,8 @@ const ReelEngine = (() => {
       </div>
       <p class="kv">Items with a name and an Amazon link are listed even when their original photo is not published. Photos are only copied when the item has a cutout, or you have ticked permission on the item.</p>
       <div class="row"><button class="btn" id="shPublish">${sp?.published ? "Update shop page" : "Publish shop page"}</button>${sp?.published ? '<button class="btn secondary" id="shUnpub">Unpublish</button>' : ""}</div>
-      ${sp?.published ? '<div class="row"><button class="btn secondary small" id="shCopyLink">Copy link</button><a class="btn secondary small" id="shOpen" target="_blank" rel="noopener">Open page</a></div>' : ""}
+      <div class="row"><button class="btn secondary small" id="shCopyLink">Copy link</button>${sp?.published ? '<a class="btn secondary small" id="shOpen" target="_blank" rel="noopener">Open page</a>' : ""}</div>
+      <p class="kv" style="margin:0">Copy link shares this outfit's shop page: the collage on top, then every saved product with its name and a Shop on Amazon button.</p>
       <hr style="border:0;border-top:1px solid var(--line)">
       <button class="btn" id="shFbPost">Create Facebook Page post (review → approve → post or schedule)</button>
       ${state.fbPosts.filter((p) => p.collage_id === ed.c.id && !["cancelled"].includes(p.status)).slice(0, 3).map((p) => `<button class="btn secondary small" data-fbpost="${p.id}">Open ${esc(p.status)} post${p.scheduled_for ? " · " + esc(fmtWhen(p.scheduled_for)) : ""}</button>`).join("")}
@@ -2481,15 +2552,25 @@ const ReelEngine = (() => {
     $("shPublish").onclick = async () => {
       if (heroMode === "custom" && !heroFile && !isCustomHeroPath(sp?.collage_public_path)) { note("shMsg", "Choose an image first, or switch to Auto collage.", true); return; }
       $("shPublish").disabled = true; note("shMsg", "Publishing…");
-      try { const p = await publishShop($("capText").value, { hero: heroMode, heroBlob: heroMode === "custom" ? heroFile : null }); note("shMsg", "Live at " + shopLink(p)); shareSheet(); }
+      try { const p = await publishShop($("capText").value, { hero: heroMode, heroBlob: heroMode === "custom" ? heroFile : null }); note("shMsg", "Live at " + shopLink(p)); await shareSheet(); }
       catch (e) { note("shMsg", e.message, true); $("shPublish").disabled = false; }
     };
+    $("shCopyLink").onclick = async () => {
+      try {
+        note("shMsg", "Preparing the shop page…");
+        const p = await ensureShopPage(ed.c, ed.layout); const link = shopLink(p);
+        await copyText(link, "shMsg");
+        if ($("shMsg").classList.contains("ok") || $("shMsg").textContent === "Copied.") note("shMsg", "Copied. The page opens with the collage and a Shop on Amazon button for every saved product.");
+      } catch (e) { note("shMsg", e.message, true); }
+    };
     if (sp?.published) {
-      $("shUnpub").onclick = async () => { if (!confirm("Unpublish this shop page? The link will stop working.")) return; await unpublishShop(sp); shareSheet(); };
-      $("shCopyLink").onclick = () => copyText(shopLink(sp), "shMsg"); $("shOpen").href = shopLink(sp); $("shOpen").onclick = (e) => { e.preventDefault(); openShopPreview(shopLink(sp)); };
+      $("shUnpub").onclick = async () => { if (!confirm("Unpublish this shop page? The link will stop working.")) return; await unpublishShop(sp); await shareSheet({ ensure: false }); };
+      $("shOpen").href = shopLink(sp); $("shOpen").onclick = (e) => { e.preventDefault(); openShopPreview(shopLink(sp)); };
     }
+    if (ensureError) note("shMsg", ensureError.message, true);
     $("shFbPost").onclick = async () => {
-      const link = sp?.published ? shopLink(sp) : "";
+      let link = sp?.published ? shopLink(sp) : "";
+      try { const p = await ensureShopPage(ed.c, ed.layout); link = shopLink(p); } catch (e) { note("shMsg", e.message, true); return; }
       $("shFbPost").disabled = true; note("shMsg", "Preparing post…");
       try {
         const id = crypto.randomUUID();
@@ -2505,7 +2586,9 @@ const ReelEngine = (() => {
     };
     $("sheetBody").querySelectorAll("[data-fbpost]").forEach((b) => b.onclick = () => fbPostSheet(b.dataset.fbpost));
     $("shFacebook").onclick = async () => {
-      const link = sp?.published ? shopLink(sp) : ""; const text = $("capText").value + (link ? "\n\n" + link : "");
+      let link = sp?.published ? shopLink(sp) : "";
+      try { const p = await ensureShopPage(ed.c, ed.layout); link = shopLink(p); } catch (e) { note("shMsg", e.message, true); return; }
+      const text = $("capText").value + (link && !$("capText").value.includes(link) ? "\n\n" + link : "");
       try {
         const blob = await renderLayout(ed.layout, 1620); const ext = ed.layout?.imported ? collageFileExt(ed.layout, blob) : "jpg"; const file = new File([blob], `outfit.${ext}`, { type: blob.type || (ext === "png" ? "image/png" : "image/jpeg") });
         if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text }); note("shMsg", "Shared. If the text didn't come through, use Copy caption + Copy link."); return; }
@@ -2870,7 +2953,7 @@ const ReelEngine = (() => {
           <p class="kv" style="margin:6px 0 0">One clean link only. The outfit page also lets people browse the rest of your storefront.</p></div>
         <label class="inline"><input type="checkbox" id="rsList"> Also list individual Amazon links (off by default — Facebook may turn one of them into the post's link)</label>
         <div><label>Caption (shop link + disclosure)</label><textarea id="rsCap" style="min-height:140px">${esc(r.caption)}</textarea><p class="kv" style="margin:4px 0 0">Edit freely — press and hold to select, or tap Select all.</p></div>
-        <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="rsSelect">Select all</button><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsCopyShop" ${link ? "" : "disabled"}>Copy shop link</button><button class="btn secondary small" id="rsRefresh">Refresh caption</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
+        <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" id="rsSelect">Select all</button><button class="btn secondary small" id="rsCopy">Copy caption</button><button class="btn secondary small" id="rsCopyShop" ${link || (o && state.collages.some((c) => c.outfit_id === o.id)) ? "" : "disabled"}>Copy shop link</button><button class="btn secondary small" id="rsRefresh">Refresh caption</button><button class="btn secondary small" id="rsSaveCap">Save caption</button></div>
         <button class="btn" id="rsShare">Share video (caption copied for pasting)</button>
         <p class="kv">The video is shared on its own as a real video, and the caption is copied to your clipboard. In Facebook or Instagram: New Reel (or New post) → pick the video → paste the caption. Keep the text and links out of the share sheet, otherwise Facebook can turn the post into a link post and send people to one product. Links in Reel captions aren't tappable everywhere, so keep your storefront link in your bio too.</p>
         <button class="btn danger" id="rsDel">Delete reel</button><div id="rsMsg" class="msg"></div></div>`);
@@ -2880,7 +2963,14 @@ const ReelEngine = (() => {
     $("rsDest").querySelectorAll("[data-dest]").forEach((b) => b.onclick = () => { dest = b.dataset.dest; $("rsDest").querySelectorAll("[data-dest]").forEach((k) => k.classList.toggle("on", k === b)); regen(); });
     $("rsList").onchange = regen; $("rsRefresh").onclick = regen;
     $("rsCopy").onclick = () => copyText($("rsCap").value, "rsMsg"); $("rsSelect").onclick = () => selectAllText($("rsCap"));
-    $("rsCopyShop").onclick = () => copyText(link, "rsMsg");
+    $("rsCopyShop").onclick = async () => {
+      try {
+        const c = o && state.collages.find((x) => x.outfit_id === o.id);
+        const page = c ? await ensureShopPage(c, c.layout) : (sp?.published ? sp : null);
+        if (!page?.slug) { note("rsMsg", "Save a collage for this outfit first.", true); return; }
+        await copyText(shopLink(page), "rsMsg");
+      } catch (e) { note("rsMsg", e.message, true); }
+    };
     if ($("rsOpenShop")) $("rsOpenShop").onclick = (e) => { e.preventDefault(); openShopPreview(link); };
     $("rsSaveCap").onclick = async () => { const { error } = await sb.from("reels").update({ caption: $("rsCap").value }).eq("id", r.id).eq("user_id", state.uid); note("rsMsg", error ? error.message : "Caption saved.", !!error); if (!error) loadAll(); };
     $("rsShare").onclick = async () => { try { note("rsMsg", "Preparing…"); const blob = await blobOf(r.path); const file = new File([blob], `closetiq-reel.${r.path.endsWith(".webm") ? "webm" : "mp4"}`, { type: r.mime || "video/mp4" });
