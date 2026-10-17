@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5efe6">
+<title>Shop · ClosetIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,620&family=Inter+Tight:wght@400;500;600&display=swap">
+<style>
+  :root{--bg:#f5efe6;--card:#fffcf7;--ink:#1c1915;--muted:#70675c;--line:#e5dbcc;--soft:#efe6d9;--gold:#a8894f;--gold-ink:#fffaf0}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Inter Tight",system-ui,sans-serif}
+  .wrap{max-width:560px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom))}
+  .eyebrow{font:600 12px/1 "Inter Tight",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+  h1{font:600 40px/1.05 Fraunces,serif;margin:0;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin:8px 0 0}
+  .banner{background:#1c1915;color:#f5efe6;border-radius:12px;padding:10px 12px;font-size:13px;margin:0 0 16px}
+  .chips{display:flex;gap:8px;overflow:auto;padding:16px 0 4px;scrollbar-width:none}
+  .chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 14px;font:500 14px "Inter Tight",sans-serif}
+  .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  a.card{display:block;text-decoration:none;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .swatch{aspect-ratio:4/5;display:grid;place-items:end start;padding:10px;color:#fffaf0;font-size:11px;letter-spacing:.08em}
+  .ct{padding:10px 12px 12px}
+  .ti{font-weight:600;margin:0;font-size:15px;line-height:1.25}
+  .cat{color:var(--muted);font-size:12px;margin:4px 0 0}
+  .disc{font-size:13px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:18px 0 0}
+  .item{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;margin:0 0 10px}
+  .item .ph{width:84px;height:104px;border-radius:10px;flex:0 0 84px}
+  .item img{width:84px;height:104px;object-fit:cover;border-radius:10px;background:#fff}
+  .n{font-weight:600;margin:0}
+  .b{color:var(--muted);font-size:13px;margin:2px 0 8px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;width:100%;padding:10px 14px;border-radius:10px;background:var(--gold);color:var(--gold-ink);font-weight:600;text-decoration:none;font-size:14px}
+  .btn[aria-disabled="true"]{opacity:.55;pointer-events:none;background:var(--soft);color:var(--muted)}
+  .back{color:var(--muted);text-decoration:none;font-size:14px;display:inline-block;margin-bottom:12px}
+  .empty{color:var(--muted);text-align:center;padding:48px 0}
+  .about{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:16px}
+  .about h2{font:600 22px/1.2 Fraunces,serif;margin:0 0 8px}
+  .about p{color:var(--muted);margin:0}
+</style>
+</head>
+<body>
+<div class="wrap" id="page"><p class="empty">Loading…</p></div>
+<script src="./config.js"></script>
+<script>
+(async () => {
+  const cfg = window.CLOSETIQ_STOREFRONT || { supabaseUrl: "", supabaseAnonKey: "", goBase: "/go" };
+  const page = document.getElementById("page");
+  const qs = new URLSearchParams(location.search);
+  const pathHandle = (location.pathname.match(/\/@([^/]+)/) || [])[1] || "";
+  const handle = (qs.get("handle") || pathHandle || "heather").replace(/^@/, "").toLowerCase();
+  const look = qs.get("look") || (location.pathname.match(/\/looks\/([^/]+)/) || [])[1] || "";
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const example = {
+    handle: "heather",
+    title: "Shop My Style",
+    subtitle: "Outfits, favorite finds and everyday inspiration.",
+    disclosure: "As an Amazon Associate I earn from qualifying purchases.",
+    about_title: "Meet ClosetIQ",
+    about_text: "ClosetIQ is a separate app for styling your own closet. This page is only a shop.",
+    example: true,
+    looks: [
+      { slug: "espresso", title: "Spotted in Espresso", category: "Date night", featured: true, swatch: "#b08a62", items: [
+        { name: "Satin trousers", brand: "Amazon", price_text: "$48", go_id: "demo000001", not_monetized: false },
+        { name: "Gold drop earrings", brand: "ShopMy", price_text: "$28", go_id: null, not_monetized: true },
+      ]},
+      { slug: "olive", title: "Olive & On the Go", category: "Everyday", featured: false, swatch: "#c5bea8", items: [
+        { name: "Olive knit", brand: "Amazon", price_text: "$36", go_id: "demo000002", not_monetized: false },
+      ]},
+      { slug: "burgundy", title: "Date night, burgundy", category: "Date night", featured: false, swatch: "#5c4638", items: [] },
+      { slug: "office", title: "Office neutrals", category: "Workwear", featured: false, swatch: "#d9c7a6", items: [] },
+    ],
+    collections: [
+      { name: "Complete looks", looks: ["espresso", "olive", "burgundy", "office"] },
+      { name: "Fall under $100", looks: ["espresso", "olive"] },
+    ],
+    finds: [],
+  };
+
+  let data = null;
+  let usingExample = false;
+  if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+    try {
+      const response = await fetch(cfg.supabaseUrl.replace(/\/$/, "") + "/rest/v1/rpc/storefront_by_handle", {
+        method: "POST",
+        headers: {
+          apikey: cfg.supabaseAnonKey,
+          Authorization: "Bearer " + cfg.supabaseAnonKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_handle: handle }),
+      });
+      data = response.ok ? await response.json() : null;
+    } catch (_) { data = null; }
+  }
+  if (!data) {
+    if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+      page.innerHTML = `<div class="empty"><p class="eyebrow">ClosetIQ</p><h1>Not available</h1><p>This storefront doesn't exist.</p></div>`;
+      return;
+    }
+    data = { ...example, handle };
+    usingExample = true;
+  }
+
+  const origin = location.origin && location.origin !== "null" ? location.origin : "";
+  const self = (extra) => {
+    const next = new URLSearchParams();
+    next.set("handle", data.handle);
+    if (extra) Object.entries(extra).forEach(([k, v]) => v && next.set(k, v));
+    const file = location.pathname.endsWith(".html") ? location.pathname.split("/").pop() : "index.html";
+    return `${file}?${next.toString()}`;
+  };
+  const goHref = (id) => id ? `go.html?id=${encodeURIComponent(id)}` : "";
+  document.title = `${data.seo_title || data.title} · ClosetIQ`;
+
+  const swatches = ["#b08a62", "#c5bea8", "#5c4638", "#d9c7a6", "#8d7355"];
+  const card = (lookItem, i) => `<a class="card" href="${esc(self({ look: lookItem.slug }))}">
+      <div class="swatch" style="background:${esc(lookItem.swatch || swatches[i % swatches.length])}">EXAMPLE</div>
+      <div class="ct"><p class="ti">${esc(lookItem.title)}</p>${lookItem.category ? `<p class="cat">${esc(lookItem.category)}</p>` : ""}</div>
+    </a>`;
+
+  if (look) {
+    const found = (data.looks || []).find((item) => item.slug === look);
+    if (!found) {
+      page.innerHTML = `<div class="empty"><p class="eyebrow">@${esc(data.handle)}</p><h1>Look unavailable</h1><p><a class="back" href="${esc(self())}">All looks</a></p></div>`;
+      return;
+    }
+    page.innerHTML = `${usingExample ? '<p class="banner">Example storefront. Connect a Supabase project to publish a real one. No profiles or follows live here.</p>' : ""}
+      <a class="back" href="${esc(self())}">‹ All looks</a>
+      <p class="eyebrow">@${esc(data.handle)}</p>
+      <h1>${esc(found.title)}</h1>
+      ${found.caption ? `<p class="sub">${esc(found.caption)}</p>` : ""}
+      <div class="swatch" style="aspect-ratio:4/5;border-radius:16px;margin:16px 0;background:${esc(found.swatch || swatches[0])}">EXAMPLE</div>
+      <p class="disc">${esc(data.disclosure || "")}</p>
+      ${(found.items || []).map((item) => `<article class="item">
+          ${item.image_url ? `<img src="${esc(item.image_url)}" alt="">` : `<div class="ph" style="background:${esc(found.swatch || "#c5bea8")}"></div>`}
+          <div style="flex:1"><p class="n">${esc(item.name)}</p>
+            <p class="b">${esc([item.brand, item.price_text].filter(Boolean).join(" · "))}${item.not_monetized ? " · No affiliate link yet" : ""}</p>
+            ${item.go_id ? `<a class="btn" href="${esc(goHref(item.go_id))}" rel="sponsored noopener">Shop</a>` : `<span class="btn" aria-disabled="true">No affiliate link yet</span>`}
+          </div></article>`).join("") || '<p class="empty">Pieces for this look are on the way.</p>'}
+      <p class="disc">Prices and availability are shown on the retailer's site. ClosetIQ counts the click and does not change the link.</p>`;
+    return;
+  }
+
+  const cats = [...new Set((data.looks || []).map((item) => item.category).filter(Boolean))];
+  page.innerHTML = `${usingExample ? '<p class="banner">Example storefront for @' + esc(data.handle) + '. A connected project serves this page at /@' + esc(data.handle) + '. Shoppers can browse looks. There is no profile, follow button or community.</p>' : ""}
+    <p class="eyebrow">ClosetIQ · @${esc(data.handle)}</p>
+    <h1>${esc(data.title || "Shop My Style")}</h1>
+    ${data.subtitle ? `<p class="sub">${esc(data.subtitle)}</p>` : ""}
+    ${cats.length ? `<div class="chips" id="chips"><button class="chip on" data-c="">All looks</button>${cats.map((c) => `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>` : ""}
+    <div class="grid" id="grid">${(data.looks || []).map(card).join("") || '<p class="empty">No published looks yet.</p>'}</div>
+    ${(data.collections || []).length ? `<div class="about"><h2>Collections</h2><p>${(data.collections || []).map((c) => esc(c.name)).join(" · ")}</p></div>` : ""}
+    <div class="about"><h2>${esc(data.about_title || "Meet ClosetIQ")}</h2><p>${esc(data.about_text || "ClosetIQ is a separate app for styling your own closet. This page is a shop.")}</p></div>
+    <p class="disc">${esc(data.disclosure || "")}</p>`;
+  const grid = document.getElementById("grid");
+  document.getElementById("chips")?.querySelectorAll(".chip").forEach((button) => {
+    button.onclick = () => {
+      document.querySelectorAll(".chip").forEach((chip) => chip.classList.toggle("on", chip === button));
+      [...grid.children].forEach((child, index) => {
+        const category = (data.looks[index] || {}).category || "";
+        child.style.display = !button.dataset.c || category === button.dataset.c ? "" : "none";
+      });
+    };
+  });
+})();
+</script>
+</body>
+</html>
