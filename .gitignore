@@ -1,0 +1,7 @@
+# Local secrets for the new multi-creator app. Do not commit real keys.
+.env
+.env.*
+!.env.example
+storefront/config.js
+app/dart_defines.json
+app/dart_defines.local.json
