@@ -37,10 +37,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key("pieces-continue")));
     await tester.pumpAndSettle();
-    expect(find.text("Try it on"), findsWidgets);
+    expect(find.text("Try it on (optional)"), findsOneWidget);
+    expect(find.text("Skip try-on"), findsOneWidget);
+    expect(find.text("Try it on · credits shown first"), findsOneWidget);
+    await tester.tap(find.text("Make & share"));
+    await tester.pumpAndSettle();
+    expect(find.text("Make & share"), findsWidgets);
+    await tester.tap(find.text("Back"));
+    await tester.pumpAndSettle();
+    expect(find.text("Skip try-on"), findsOneWidget);
     await tester.tap(find.byKey(const Key("try-continue")));
     await tester.pumpAndSettle();
-    expect(find.text("Make & share"), findsOneWidget);
+    expect(find.text("Make & share"), findsWidgets);
 
     await tester.tap(find.byKey(const Key("open-share-sheet")));
     await tester.pumpAndSettle();

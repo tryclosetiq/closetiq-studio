@@ -68,42 +68,7 @@ class _CreateFlowScreenState extends State<CreateFlowScreen> {
               ],
             ),
           ),
-          if (!wide)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-              child: Row(
-                children: [
-                  for (var i = 0; i < 4; i++)
-                    Expanded(
-                      child: Container(
-                        height: 4,
-                        margin: EdgeInsets.only(right: i == 3 ? 0 : 6),
-                        decoration: BoxDecoration(
-                          color: i <= _step ? Brand.ink : Brand.line,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-              child: Row(
-                children: [
-                  for (final (index, label) in const [(0, "Idea"), (1, "Pick pieces"), (2, "Try it on"), (3, "Make & share")])
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text("${index + 1}  $label"),
-                        selected: _step == index,
-                        onSelected: index <= _step ? (_) => setState(() => _step = index) : null,
-                      ),
-                    ),
-                ],
-              ),
-            ),
+          _stepIndicator(snapshot, wide),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(20),
@@ -115,6 +80,94 @@ class _CreateFlowScreenState extends State<CreateFlowScreen> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  static const _steps = <(int, String, String?)>[
+    (0, "Idea", null),
+    (1, "Pick pieces", null),
+    (2, "Try it on", "optional"),
+    (3, "Make & share", null),
+  ];
+
+  bool _canOpen(int index) {
+    if (index <= _step) return true;
+    if (_selected.isEmpty && _step < 2) return false;
+    // Try-on is optional, so Make & share stays open once pieces are chosen.
+    return index == 2 || index == 3;
+  }
+
+  void _goToStep(int index, StudioSnapshot snapshot) {
+    if (index == _step || !_canOpen(index)) return;
+    setState(() {
+      if (index == 3) _ensureCaption(snapshot);
+      _step = index;
+    });
+  }
+
+  Widget _stepIndicator(StudioSnapshot snapshot, bool wide) {
+    if (wide) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+        child: Row(
+          children: [
+            for (final (index, label, hint) in _steps)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text("${index + 1}  $label${hint == null ? "" : " · $hint"}"),
+                  selected: _step == index,
+                  onSelected: _canOpen(index) ? (_) => _goToStep(index, snapshot) : null,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: Row(
+        children: [
+          for (final (index, label, hint) in _steps)
+            Expanded(
+              child: InkWell(
+                onTap: _canOpen(index) ? () => _goToStep(index, snapshot) : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Column(
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: _step == index ? FontWeight.w700 : FontWeight.w500,
+                          color: _step == index ? Brand.ink : Brand.muted,
+                        ),
+                      ),
+                      SizedBox(
+                        height: 14,
+                        child: hint == null
+                            ? null
+                            : const Text("optional", style: TextStyle(fontSize: 10, height: 1.2, color: Brand.muted)),
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: index <= _step ? Brand.ink : Brand.line,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -207,9 +260,11 @@ class _CreateFlowScreenState extends State<CreateFlowScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text("Try it on", style: Theme.of(context).textTheme.displaySmall),
+        Text("Try it on (optional)", style: Theme.of(context).textTheme.displaySmall),
         const SizedBox(height: 8),
-        const Text("AI try-on on you or an AI model uses credits. That call is not connected in this version, so nothing is charged."),
+        const Text("See the look on you or an AI model before you share. It uses credits, and you'll see the cost before it runs. Skip it if you just want to share your pieces."),
+        const SizedBox(height: 6),
+        Text("It isn't connected in this version, so nothing is charged.", style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 12),
         Container(
           height: 280,
@@ -223,11 +278,15 @@ class _CreateFlowScreenState extends State<CreateFlowScreen> {
         ),
         const SizedBox(height: 12),
         OutlinedButton(
-          onPressed: () => _later(context, "Try-on runs through FASHN in a later phase. Continue to Make & share with the pieces you picked."),
-          child: const Text("Try it on · credits shown before it runs"),
+          onPressed: () => _later(context, "Try-on runs through FASHN in a later phase. You'll see the credit cost before it runs. Nothing is charged in this version."),
+          child: const Text("Try it on · credits shown first"),
         ),
         const SizedBox(height: 8),
-        FilledButton(key: const Key("try-continue"), onPressed: () => setState(() { _ensureCaption(snapshot); _step = 3; }), child: const Text("Continue to share")),
+        FilledButton(
+          key: const Key("try-continue"),
+          onPressed: () => setState(() { _ensureCaption(snapshot); _step = 3; }),
+          child: const Text("Skip try-on"),
+        ),
       ],
     );
   }
