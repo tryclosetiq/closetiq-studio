@@ -124,16 +124,16 @@ class _CreateFlowScreenState extends State<CreateFlowScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text("What's the idea?", style: Theme.of(context).textTheme.displaySmall),
+        Text("What's the look?", style: Theme.of(context).textTheme.displaySmall),
         const SizedBox(height: 8),
-        const Text("One flow: idea, pieces, try-on, share. You can jump back to any step."),
+        const Text("Describe the vibe. We'll use it for your title and caption, then you'll pick pieces from your closet."),
         const SizedBox(height: 14),
         TextField(
           key: const Key("idea-field"),
           controller: _idea,
           minLines: 3,
           maxLines: 5,
-          decoration: const InputDecoration(hintText: "3 cozy fall looks under \$100, espresso and cream"),
+          decoration: const InputDecoration(hintText: "e.g. Fall date night, cozy and chic"),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -147,16 +147,20 @@ class _CreateFlowScreenState extends State<CreateFlowScreen> {
         Wrap(
           spacing: 8,
           children: [
-            OutlinedButton(onPressed: () => _later(context, "Voice input is not in this version."), child: const Text("Speak it")),
-            OutlinedButton(onPressed: () => _later(context, "The AI stylist is not connected in this version."), child: const Text("AI stylist")),
-            OutlinedButton(onPressed: () => setState(() => _step = 1), child: const Text("My closet")),
+            OutlinedButton(onPressed: () => _later(context, "Voice input is not in this version."), child: const Text("Speak it · coming soon")),
+            OutlinedButton(
+              onPressed: () => _later(context, "Soon the AI stylist will find real products that match your idea."),
+              child: const Text("AI stylist · coming soon"),
+            ),
           ],
         ),
         const SizedBox(height: 16),
+        // Phase 1 only names the look. When Discover / AI stylist search is wired
+        // in phase 2, this button should go back to "Show me outfits".
         FilledButton(
           key: const Key("idea-continue"),
           onPressed: () => setState(() => _step = 1),
-          child: const Text("Show me outfits"),
+          child: const Text("Pick from my closet"),
         ),
       ],
     );

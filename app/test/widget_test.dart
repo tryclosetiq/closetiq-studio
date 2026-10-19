@@ -28,7 +28,8 @@ void main() {
 
     await tester.tap(find.byKey(const Key("nav-create")));
     await tester.pumpAndSettle();
-    expect(find.text("What's the idea?"), findsOneWidget);
+    expect(find.text("What's the look?"), findsOneWidget);
+    expect(find.text("Pick from my closet"), findsOneWidget);
     await tester.enterText(find.byKey(const Key("idea-field")), "Espresso season");
     await tester.tap(find.byKey(const Key("idea-continue")));
     await tester.pumpAndSettle();
