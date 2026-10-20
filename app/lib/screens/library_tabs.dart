@@ -48,14 +48,25 @@ class _ModelsScreenState extends State<ModelsScreen> {
               const SectionLabel("Face · close-up portrait (identity)"),
               const SizedBox(height: 6),
               SizedBox(
-                height: 96,
-                child: DashedAddTile(label: "+ Portrait", onTap: () => studioLater(context, "Adding a face portrait arrives with model generation. Nothing is charged.")),
+                height: 108,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    SizedBox(
+                      width: 88,
+                      child: DashedAddTile(
+                        label: "+ Portrait",
+                        onTap: () => studioLater(context, "Adding a face portrait arrives with model generation. Nothing is charged."),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 10),
               const SectionLabel("Body · full-length photos (proportions)"),
               const SizedBox(height: 6),
               SizedBox(
-                height: 120,
+                height: 108,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
                   children: [
