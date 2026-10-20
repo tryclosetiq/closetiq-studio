@@ -24,47 +24,54 @@ class _StorefrontScreenState extends State<StorefrontScreen> {
     if (snapshot == null) return const SizedBox.shrink();
     final handle = snapshot.settings.handle;
     final url = handle == null ? "" : state.config.storefrontUrl(handle);
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(20),
+    return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
         children: [
-          Row(
-            children: [
-              Expanded(child: Text("Storefront", style: Theme.of(context).textTheme.displaySmall)),
-              IconButton(
-                key: const Key("storefront-qr"),
-                tooltip: "QR code",
-                onPressed: url.isEmpty ? null : () => _qr(context, url),
-                icon: const Icon(Icons.ios_share),
-              ),
-            ],
+          Text("Storefront", style: Theme.of(context).textTheme.headlineSmall),
+          const SizedBox(height: 6),
+          Text(
+            "Your public shopping page for your bios. Everything you publish from the Studio appears there.",
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Brand.muted),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: studioCard(),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Your link", style: Theme.of(context).textTheme.bodySmall),
-                      Text(url.isEmpty ? "Choose a handle to publish" : url.replaceFirst("https://", ""), style: const TextStyle(fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-                FilledButton(
-                  key: const Key("copy-storefront"),
-                  onPressed: url.isEmpty
-                      ? null
-                      : () async {
-                          await Clipboard.setData(ClipboardData(text: url));
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Link copied.")));
-                          }
-                        },
-                  child: const Text("Copy"),
+                Text("Your link", style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 4),
+                Text(url.isEmpty ? "Choose a handle to publish" : url.replaceFirst("https://", ""), style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    FilledButton(
+                      key: const Key("copy-storefront"),
+                      onPressed: url.isEmpty
+                          ? null
+                          : () async {
+                              try {
+                                await Clipboard.setData(ClipboardData(text: url));
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Link copied.")));
+                                }
+                              } catch (_) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Copy failed. Select the link and copy it manually.")));
+                                }
+                              }
+                            },
+                      child: const Text("Copy link"),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      key: const Key("storefront-qr"),
+                      onPressed: url.isEmpty ? null : () => _qr(context, url),
+                      icon: const Icon(Icons.qr_code_2),
+                      label: const Text("QR"),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -80,7 +87,6 @@ class _StorefrontScreenState extends State<StorefrontScreen> {
           const SizedBox(height: 14),
           if (_preview) _PublicPreview(snapshot: snapshot) else _Editor(snapshot: snapshot),
         ],
-      ),
     );
   }
 

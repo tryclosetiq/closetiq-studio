@@ -4,121 +4,123 @@ import "package:go_router/go_router.dart";
 import "../app_state.dart";
 import "../theme/brand.dart";
 
+/// Phone layout from the live Studio: Fraunces title, credit counter, and a
+/// horizontally scrolling tab bar in the same order as index.html.
 class StudioShell extends StatelessWidget {
   const StudioShell({required this.child, required this.location, super.key});
 
   final Widget child;
   final String location;
 
-  bool get _create => location.startsWith("/create");
+  static const tabs = <(String, String, IconData)>[
+    ("/models", "Models", Icons.person_outline),
+    ("/clothing", "Clothing", Icons.checkroom_outlined),
+    ("/try-on", "Try-On", Icons.auto_awesome_outlined),
+    ("/discover", "Discover", Icons.search),
+    ("/collages", "Collages", Icons.dashboard_customize_outlined),
+    ("/photos", "Photos", Icons.photo_outlined),
+    ("/outfits", "Outfits", Icons.grid_view_rounded),
+    ("/reels", "Reels", Icons.play_circle_outline),
+    ("/storefront", "Storefront", Icons.storefront_outlined),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 900;
-    if (wide) {
-      return Scaffold(
-        body: Row(
-          children: [
-            _Sidebar(location: location),
-            Expanded(child: child),
-          ],
-        ),
-      );
-    }
+    final settings = StudioScope.of(context).store?.snapshot.settings;
+    final usage = settings?.usageLabel ?? "";
     return Scaffold(
-      body: child,
-      bottomNavigationBar: _create ? null : _PhoneNav(location: location),
-    );
-  }
-}
-
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.location});
-
-  final String location;
-
-  @override
-  Widget build(BuildContext context) {
-    final state = StudioScope.of(context);
-    final settings = state.store?.snapshot.settings;
-    return Container(
-      width: 232,
-      color: const Color(0xFFF8F3EB),
-      padding: const EdgeInsets.fromLTRB(16, 22, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Column(
         children: [
-          Text("ClosetIQ", style: Theme.of(context).textTheme.headlineSmall),
-          Text("STUDIO", style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Brand.gold, letterSpacing: 1.4)),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            key: const Key("nav-create"),
-            onPressed: () => context.go("/create"),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text("Create a post"),
-          ),
-          const SizedBox(height: 12),
-          _SideLink(location: location, path: "/home", label: "Home", icon: Icons.home_outlined),
-          _SideLink(location: location, path: "/closet", label: "Closet", icon: Icons.checkroom_outlined),
-          _SideLink(location: location, path: "/storefront", label: "Storefront", icon: Icons.storefront_outlined),
-          _SideLink(location: location, path: "/schedule", label: "Schedule", icon: Icons.calendar_month_outlined),
-          _SideLink(location: location, path: "/insights", label: "Insights", icon: Icons.bar_chart_rounded),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: studioCard(radius: 14),
-            child: Row(
-              children: [
-                const Text("Credits"),
-                const Spacer(),
-                Text("${settings?.creditBalance ?? 0} / ${settings?.creditAllowance ?? 0}", style: const TextStyle(fontWeight: FontWeight.w600)),
-              ],
+          Material(
+            color: Brand.cream,
+            child: SafeArea(
+              bottom: false,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Brand.line))),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "ClosetIQ Studio",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 22),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        usage,
+                        maxLines: 2,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontSize: 12, color: Brand.muted, fontFeatures: [FontFeature.tabularFigures()]),
+                      ),
+                    ),
+                    IconButton(
+                      key: const Key("open-account"),
+                      tooltip: "Account",
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => context.go("/account"),
+                      icon: const Icon(Icons.person_outline, size: 22),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              key: const Key("nav-settings"),
-              onPressed: () => context.go("/account"),
-              child: const Text("Creator plan · Settings"),
-            ),
-          ),
+          Expanded(child: child),
+          const _TabBar(),
         ],
       ),
     );
   }
 }
 
-class _SideLink extends StatelessWidget {
-  const _SideLink({required this.location, required this.path, required this.label, required this.icon});
-
-  final String location;
-  final String path;
-  final String label;
-  final IconData icon;
+class _TabBar extends StatelessWidget {
+  const _TabBar();
 
   @override
   Widget build(BuildContext context) {
-    final selected = location == path;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: InkWell(
-        key: Key("nav-${path.substring(1)}"),
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => context.go(path),
+    final location = GoRouterState.of(context).uri.path;
+    return Material(
+      color: Brand.card,
+      child: SafeArea(
+        top: false,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: selected ? Brand.soft : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: Brand.ink),
-              const SizedBox(width: 10),
-              Text(label, style: TextStyle(fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
-            ],
+          decoration: const BoxDecoration(border: Border(top: BorderSide(color: Brand.line))),
+          height: 64,
+          child: ListView.separated(
+            key: const Key("studio-tabs"),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            itemCount: StudioShell.tabs.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 0),
+            itemBuilder: (context, index) {
+              final (path, label, icon) = StudioShell.tabs[index];
+              final selected = location == path;
+              final color = selected ? Brand.gold : Brand.muted;
+              return InkWell(
+                key: Key("nav-${path.substring(1)}"),
+                onTap: () => context.go(path),
+                child: SizedBox(
+                  width: 72,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, size: 22, color: color),
+                      const SizedBox(height: 3),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: color),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -126,67 +128,114 @@ class _SideLink extends StatelessWidget {
   }
 }
 
-class _PhoneNav extends StatelessWidget {
-  const _PhoneNav({required this.location});
+void studioLater(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}
 
-  final String location;
+class SectionLabel extends StatelessWidget {
+  const SectionLabel(this.text, {super.key});
+
+  final String text;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Brand.cream,
-      child: SafeArea(
-        top: false,
-        child: Container(
-          height: 86,
-          decoration: const BoxDecoration(border: Border(top: BorderSide(color: Brand.line))),
-          child: Row(
-            children: [
-              _tab(context, "/home", "Home", Icons.home_outlined),
-              _tab(context, "/closet", "Closet", Icons.checkroom_outlined),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Transform.translate(
-                      offset: const Offset(0, -10),
-                      child: InkWell(
-                        key: const Key("nav-create"),
-                        onTap: () => context.go("/create"),
-                        customBorder: const CircleBorder(),
-                        child: Ink(
-                          width: 58,
-                          height: 58,
-                          decoration: const BoxDecoration(color: Brand.ink, shape: BoxShape.circle),
-                          child: const Icon(Icons.add, color: Brand.cream, size: 28),
-                        ),
-                      ),
-                    ),
-                    const Text("Create", style: TextStyle(fontSize: 11, color: Brand.muted)),
-                  ],
-                ),
-              ),
-              _tab(context, "/storefront", "Storefront", Icons.storefront_outlined),
-              _tab(context, "/schedule", "Schedule", Icons.calendar_month_outlined),
-            ],
+    return Text(
+      text.toUpperCase(),
+      style: const TextStyle(fontSize: 12, letterSpacing: 0.6, color: Brand.muted, fontWeight: FontWeight.w600),
+    );
+  }
+}
+
+class DashedAddTile extends StatelessWidget {
+  const DashedAddTile({required this.label, required this.onTap, this.tileKey, super.key});
+
+  final String label;
+  final VoidCallback onTap;
+  final Key? tileKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: tileKey,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: CustomPaint(
+        painter: const _DashPainter(),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Brand.muted, fontSize: 14)),
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _tab(BuildContext context, String path, String label, IconData icon) {
-    final selected = location == path;
-    return Expanded(
-      child: InkWell(
-        key: Key("nav-${path.substring(1)}"),
-        onTap: () => context.go(path),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+class _DashPainter extends CustomPainter {
+  const _DashPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Brand.line
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    final path = Path()..addRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(12)));
+    const dash = 5.0;
+    const gap = 4.0;
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        canvas.drawPath(metric.extractPath(distance, distance + dash), paint);
+        distance += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class SwatchCard extends StatelessWidget {
+  const SwatchCard({required this.color, required this.label, this.badge, this.onTap, super.key});
+
+  final int color;
+  final String label;
+  final String? badge;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Icon(icon, color: selected ? Brand.ink : Brand.muted),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? Brand.ink : Brand.muted)),
+            ColoredBox(color: Color(color)),
+            if (badge != null)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(99)),
+                  child: Text(badge!, style: const TextStyle(color: Colors.white, fontSize: 10)),
+                ),
+              ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
+                color: Colors.black45,
+                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 12)),
+              ),
+            ),
           ],
         ),
       ),

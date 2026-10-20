@@ -65,8 +65,8 @@ ThemeData buildStudioTheme() {
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: Brand.ink,
-        foregroundColor: Brand.cream,
+        backgroundColor: Brand.gold,
+        foregroundColor: Brand.goldInk,
         minimumSize: const Size(0, 48),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

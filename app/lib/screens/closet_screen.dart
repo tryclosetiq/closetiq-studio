@@ -5,6 +5,7 @@ import "../app_state.dart";
 import "../domain/amazon_tag.dart";
 import "../domain/models.dart";
 import "../theme/brand.dart";
+import "../widgets/studio_shell.dart";
 
 class ClosetScreen extends StatelessWidget {
   const ClosetScreen({super.key});
@@ -14,42 +15,44 @@ class ClosetScreen extends StatelessWidget {
     final state = StudioScope.of(context);
     final snapshot = state.store?.snapshot;
     if (snapshot == null) return const SizedBox.shrink();
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Row(
-            children: [
-              Expanded(child: Text("Closet", style: Theme.of(context).textTheme.displaySmall)),
-              FilledButton.icon(
-                key: const Key("add-item"),
-                onPressed: () => showAddItemSheet(context),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text("Add item"),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Amazon items and anything else. A piece with no affiliate link is saved as not monetized.",
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Brand.muted),
-          ),
-          const SizedBox(height: 16),
-          if (snapshot.garments.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 40), child: Text("Your closet is empty. Paste a product link or add one by hand."))
-          else
-            LayoutBuilder(builder: (context, constraints) {
-              final columns = constraints.maxWidth > 800 ? 4 : (constraints.maxWidth > 520 ? 3 : 2);
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: columns, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 0.72),
-                itemCount: snapshot.garments.length,
-                itemBuilder: (context, index) => _GarmentTile(garment: snapshot.garments[index]),
-              );
-            }),
-        ],
-      ),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      children: [
+        Text("My Clothing", style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 6),
+        Text(
+          "Clean product images with names and affiliate links. A piece with no affiliate link is saved as not monetized.",
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Brand.muted),
+        ),
+        const SizedBox(height: 12),
+        FilledButton(
+          onPressed: () => studioLater(context, "Amazon search opens in a later update. Paste a product link instead."),
+          child: const Text("Search Amazon"),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(onPressed: () => showAddItemSheet(context), child: const Text("Add from Amazon link")),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: () => studioLater(context, "The collage canvas arrives in a later update."),
+          child: const Text("Make a collage from clothing"),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const columns = 3;
+            final width = (constraints.maxWidth - 8 * (columns - 1)) / columns;
+            final tiles = <Widget>[
+              DashedAddTile(tileKey: const Key("add-item"), label: "+ Add clothing", onTap: () => showAddItemSheet(context)),
+              for (final garment in snapshot.garments) _GarmentTile(garment: garment),
+            ];
+            return Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [for (final tile in tiles) SizedBox(width: width, height: width / 0.62, child: tile)],
+            );
+          },
+        ),
+      ],
     );
   }
 }
@@ -146,9 +149,12 @@ Future<void> showAddItemSheet(BuildContext context, {String? outfitId}) {
     isScrollControlled: true,
     showDragHandle: true,
     backgroundColor: Brand.cream,
-    builder: (context) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: _AddItemForm(outfitId: outfitId),
+    builder: (context) => ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.88),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: _AddItemForm(outfitId: outfitId),
+      ),
     ),
   );
 }

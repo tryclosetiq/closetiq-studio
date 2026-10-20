@@ -204,6 +204,8 @@ class CreatorSettings {
     this.onboardingComplete = false,
     this.creditBalance = 0,
     this.creditAllowance = 0,
+    this.usedToday = 0,
+    this.dailyCap = 20,
   });
 
   final String displayName;
@@ -219,6 +221,10 @@ class CreatorSettings {
   final bool onboardingComplete;
   final int creditBalance;
   final int creditAllowance;
+  final int usedToday;
+  final int dailyCap;
+
+  String get usageLabel => "$usedToday/$dailyCap today · $creditBalance left";
 
   CreatorSettings copyWith({
     String? displayName,
@@ -234,6 +240,8 @@ class CreatorSettings {
     bool? onboardingComplete,
     int? creditBalance,
     int? creditAllowance,
+    int? usedToday,
+    int? dailyCap,
     bool clearHandle = false,
     bool clearTag = false,
   }) {
@@ -251,6 +259,8 @@ class CreatorSettings {
       onboardingComplete: onboardingComplete ?? this.onboardingComplete,
       creditBalance: creditBalance ?? this.creditBalance,
       creditAllowance: creditAllowance ?? this.creditAllowance,
+      usedToday: usedToday ?? this.usedToday,
+      dailyCap: dailyCap ?? this.dailyCap,
     );
   }
 }

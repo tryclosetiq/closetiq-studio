@@ -5,11 +5,8 @@ import "app_state.dart";
 import "screens/account_screen.dart";
 import "screens/auth_screens.dart";
 import "screens/closet_screen.dart";
-import "screens/create_flow_screen.dart";
-import "screens/home_screen.dart";
-import "screens/insights_screen.dart";
+import "screens/library_tabs.dart";
 import "screens/onboarding_screen.dart";
-import "screens/schedule_screen.dart";
 import "screens/storefront_screen.dart";
 import "widgets/studio_shell.dart";
 
@@ -29,7 +26,9 @@ GoRouter buildRouter(AppState state) {
           if (loc == "/onboarding" || loc == "/account") return null;
           return "/onboarding";
         case Gate.ready:
-          if (loc == "/loading" || authRoute || loc == "/onboarding") return "/home";
+          if (loc == "/loading" || authRoute || loc == "/onboarding" || loc == "/home" || loc == "/create" || loc == "/closet" || loc == "/schedule") {
+            return "/models";
+          }
           return null;
       }
     },
@@ -42,12 +41,15 @@ GoRouter buildRouter(AppState state) {
       ShellRoute(
         builder: (context, route, child) => StudioShell(location: route.uri.path, child: child),
         routes: [
-          GoRoute(path: "/home", builder: (context, route) => const HomeScreen()),
-          GoRoute(path: "/closet", builder: (context, route) => const ClosetScreen()),
-          GoRoute(path: "/create", builder: (context, route) => const CreateFlowScreen()),
+          GoRoute(path: "/models", builder: (context, route) => const ModelsScreen()),
+          GoRoute(path: "/clothing", builder: (context, route) => const ClosetScreen()),
+          GoRoute(path: "/try-on", builder: (context, route) => const TryOnScreen()),
+          GoRoute(path: "/discover", builder: (context, route) => const DiscoverScreen()),
+          GoRoute(path: "/collages", builder: (context, route) => const CollagesScreen()),
+          GoRoute(path: "/photos", builder: (context, route) => const PhotosScreen()),
+          GoRoute(path: "/outfits", builder: (context, route) => const OutfitsScreen()),
+          GoRoute(path: "/reels", builder: (context, route) => const ReelsScreen()),
           GoRoute(path: "/storefront", builder: (context, route) => const StorefrontScreen()),
-          GoRoute(path: "/schedule", builder: (context, route) => const ScheduleScreen()),
-          GoRoute(path: "/insights", builder: (context, route) => const InsightsScreen()),
           GoRoute(path: "/account", builder: (context, route) => const AccountScreen()),
         ],
       ),

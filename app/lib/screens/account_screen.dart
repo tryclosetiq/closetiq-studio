@@ -47,8 +47,7 @@ class _AccountScreenState extends State<AccountScreen> {
   Widget build(BuildContext context) {
     final state = StudioScope.of(context);
     final settings = state.store?.snapshot.settings;
-    return SafeArea(
-      child: ListView(
+    return ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text("Account", style: Theme.of(context).textTheme.displaySmall),
@@ -113,7 +112,6 @@ class _AccountScreenState extends State<AccountScreen> {
           ),
           if (_message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
         ],
-      ),
     );
   }
 

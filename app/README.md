@@ -60,15 +60,16 @@ From the repo root:
 node --test supabase/functions/_shared/product_meta.test.js supabase/tests/contract.test.js
 ```
 
-Manual pass, preview mode is enough for the shell:
+Manual pass, preview mode is enough for the shell. The logged-in tool matches the live Studio phone layout: a Fraunces header with the credit counter, then a horizontally scrolling tab bar.
 
-- Home shows the idea card, 7-day clicks, up next, and recent looks. The chart opens Insights. The person icon opens Account.
-- Phone tabs: Home, Closet, raised Create, Storefront, Schedule. At width 900 and up, those plus Insights sit in the left sidebar.
-- Create walks Idea → Pick pieces → Try it on → Make & share. The share sheet keeps **Share to ClosetIQ** locked, with **Get the app**. Schedule saves a reminder only.
-- Closet → Add item. Paste an https link (needs `import-product`) or fill the form. Leave the affiliate link blank and the item is not monetized.
-- Storefront copies `https://closetiq.app/@heather` and shows a QR code. Hiding a piece keeps it on the outfit.
+- Tabs, in order: Models, Clothing, Try-On, Discover, Collages, Photos, Outfits, Reels, Storefront. The active tab is gold. The person icon in the header opens Account.
+- Models shows reference photos, filter chips, and **Generate a model**. Generation names the credit cost and does not run in this version.
+- Clothing holds the closet. **Add clothing** and **Add from Amazon link** paste a product URL (needs `import-product`) or take a name, price, photo, and optional affiliate link. A blank affiliate link is saved as not monetized.
+- Try-On, Discover's AI stylist, collage editing, and reel rendering say they are coming soon and do not charge credits. Try-on stays optional: **Share without try-on** opens the share sheet.
+- Outfits, Collages, Reels, and Try-On open the share sheet. **Share to ClosetIQ** stays locked, with **Get the app**. Schedule saves a reminder only.
+- Storefront copies `https://closetiq.app/@heather`, shows a QR code, and edits collections and looks.
 - Account → Delete account asks you to type DELETE, then returns to sign-in. Sign-in offers Google, Apple, and the example preview.
 
 ## Later, not in this phase
 
-Billing, credit purchases, FASHN try-on, auto captions, Discover, link-health checks, Amazon upload-pack export, and any social auto-post. Schedule rows are reminders. The iOS app does not store social tokens.
+Billing, credit purchases, FASHN try-on, model generation, the AI stylist, collage editing, reel rendering, link-health checks, Amazon upload-pack export, and any social auto-post. Schedule rows are reminders. The iOS app does not store social tokens.
