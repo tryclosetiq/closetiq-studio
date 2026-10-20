@@ -1,0 +1,3 @@
+/go/:id   /go.html?id=:id   200
+/@:handle  /index.html?handle=:handle  200
+/@:handle/looks/:slug  /index.html?handle=:handle&look=:slug  200

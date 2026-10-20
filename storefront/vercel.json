@@ -1,0 +1,8 @@
+{
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/go/:id", "destination": "/go.html?id=:id" },
+    { "source": "/@:handle", "destination": "/index.html?handle=:handle" },
+    { "source": "/@:handle/looks/:slug", "destination": "/index.html?handle=:handle&look=:slug" }
+  ]
+}

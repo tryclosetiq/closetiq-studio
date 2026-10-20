@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Opening link · ClosetIQ</title>
+<style>
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5efe6;color:#1c1915;font:16px/1.5 "Inter Tight",system-ui,sans-serif}
+  main{max-width:360px;padding:24px;text-align:center}
+  h1{font:600 28px/1.15 Fraunces,serif;margin:0 0 8px}
+  p{color:#70675c;margin:0}
+</style>
+</head>
+<body>
+<main>
+  <h1>Opening link</h1>
+  <p id="msg">One moment.</p>
+</main>
+<script src="./config.js"></script>
+<script>
+(async () => {
+  const cfg = window.CLOSETIQ_STOREFRONT || {};
+  const params = new URLSearchParams(location.search);
+  const id = params.get("id") || "";
+  const msg = document.getElementById("msg");
+  if (!/^[a-z0-9]{6,16}$/i.test(id)) { msg.textContent = "This link is not available."; return; }
+  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
+    msg.textContent = "This is an example link. Clicks are logged after the storefront is connected to a Supabase project.";
+    return;
+  }
+  try {
+    const response = await fetch(cfg.supabaseUrl.replace(/\/$/, "") + "/rest/v1/rpc/log_click", {
+      method: "POST",
+      headers: {
+        apikey: cfg.supabaseAnonKey,
+        Authorization: "Bearer " + cfg.supabaseAnonKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_id: id, p_referrer: document.referrer || null }),
+    });
+    const destination = await response.json();
+    if (response.ok && typeof destination === "string" && destination.startsWith("https://")) {
+      location.replace(destination);
+      return;
+    }
+  } catch (_) {}
+  msg.textContent = "This link is not available.";
+})();
+</script>
+</body>
+</html>
