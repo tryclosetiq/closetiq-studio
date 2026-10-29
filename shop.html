@@ -97,7 +97,16 @@
     document.title = site.title + " · ClosetIQ";
     const CATS = [["tops", "Tops"], ["bottoms", "Bottoms"], ["dresses", "Dresses & One-Pieces"], ["shoes", "Shoes"], ["handbags", "Handbags"], ["accessories", "Accessories"]];
     const catName = (k) => (CATS.find(([c]) => c === k) || [k, k])[1];
-    const outfitCard = (r) => `<a class="card" href="${home}?o=${encodeURIComponent(r.slug)}" data-cat="${esc(r.category || "")}">${r.featured ? '<span class="feat">Favorite</span>' : ""}<img class="cv" src="${pub(r.cover_public_path || r.collage_public_path)}?v=${encodeURIComponent(r.updated_at)}" alt="${esc(r.title)}" loading="lazy"><div class="ct"><p class="ti">${esc(r.title)}</p>${r.category ? `<p class="cat">${esc(r.category)}</p>` : ""}</div></a>`;
+    // Home tile. The look page shows collage_public_path. When that is a styled photo
+    // (a custom shop image, or any hero that isn't the cover file), use it. "Cover: collage"
+    // can still point at the auto product grid, so that grid is only the fallback.
+    // An AI-photo cover (cover.jpg) is already a styled image, so it stays ahead of the grid.
+    const tilePath = (r) => {
+      const hero = r.collage_public_path || "", cover = r.cover_public_path || "";
+      if (hero && hero !== cover && !/\/cover\.jpg$/i.test(cover)) return hero;
+      return cover || hero;
+    };
+    const outfitCard = (r) => `<a class="card" href="${home}?o=${encodeURIComponent(r.slug)}" data-cat="${esc(r.category || "")}">${r.featured ? '<span class="feat">Favorite</span>' : ""}<img class="cv" src="${pub(tilePath(r))}?v=${encodeURIComponent(r.updated_at)}" alt="${esc(r.title)}" loading="lazy"><div class="ct"><p class="ti">${esc(r.title)}</p>${r.category ? `<p class="cat">${esc(r.category)}</p>` : ""}</div></a>`;
     const productCard = (p) => `<a class="card prod" href="${esc(p.url)}" target="_blank" rel="noopener sponsored" data-cat="${esc(p.category)}">${p.featured ? '<span class="feat">Favorite</span>' : ""}<img class="cv" src="${pub(p.image_public_path)}?v=${encodeURIComponent(p.updated_at)}" alt="${esc(p.name)}" loading="lazy"><div class="ct"><p class="ti">${esc(p.name)}</p>${p.brand ? `<p class="cat">${esc(p.brand)}</p>` : ""}<span class="shopbtn">Shop on Amazon</span></div></a>`;
     const outfitCats = [...new Set(rows.map((r) => (r.category || "").trim()).filter(Boolean))];
     const prodCats = CATS.filter(([k]) => products.some((p) => p.category === k));
