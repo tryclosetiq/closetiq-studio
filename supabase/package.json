@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Tests for ClosetIQ Studio SQL contracts and the product-import parser. Not deployed."
+}

@@ -1,0 +1,11 @@
+# Staging / local only.
+# Do not run `supabase link` or `supabase db push` against the existing
+# production Studio project. These migrations are files for a new project.
+
+project_id = "closetiq-studio-staging"
+
+[functions.import-product]
+verify_jwt = true
+
+[functions.go]
+verify_jwt = false
