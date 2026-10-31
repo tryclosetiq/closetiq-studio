@@ -82,6 +82,7 @@
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:transparent;font-size:13px;cursor:pointer;color:var(--ink)}
   .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .chip:disabled{opacity:.45;cursor:default}
   .swatch{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);padding:0;cursor:pointer;flex:0 0 auto}
   .swatch.on{border-color:var(--ring);box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--ring)}
   .bgthumb{background-size:100% 100%;background-color:#fff}
@@ -183,11 +184,16 @@
     <h2>AI Try-On</h2>
     <div class="card stack">
       <div><label>Model</label><div class="strip" id="pickSelfie"></div></div>
-      <div><label>Clothing</label><div class="strip" id="pickGarment"></div></div>
+      <div><label>Clothing</label>
+        <p class="hint" id="pickHint">Tap to add or remove. One item is a normal try-on. Two to four try on together.</p>
+        <div class="strip" id="pickGarment"></div></div>
       <div id="srcRow" class="hidden"><label>Clothing image</label>
         <div class="chips"><button class="chip on" data-src="path">Product photo</button><button class="chip" data-src="cutout">Clean cutout</button></div>
-        <p class="hint" style="margin:6px 0 0">The product photo keeps the real fit and drape. The cutout is for collages; it tends to come out fitted in try-on.</p></div>
-      <div><label for="preset">Quality</label><select id="preset"></select></div>
+        <p class="hint" style="margin:6px 0 0">The product photo keeps the real fit and drape. The cutout is for collages; it tends to come out fitted in try-on. With several items, this choice applies to each one that has a cutout.</p></div>
+      <div id="engineRow" class="hidden"><label>Try-on</label>
+        <div class="chips" id="engineChips"><button type="button" class="chip on" data-engine="flux">FLUX · all at once</button><button type="button" class="chip" data-engine="fashn">HD · FASHN</button></div>
+        <p class="hint" id="engineNote" style="margin:6px 0 0"></p></div>
+      <div id="presetWrap"><label for="preset">Quality</label><select id="preset"></select></div>
       <div id="v16opts" class="row hidden">
         <div><label for="category">Garment type</label>
           <select id="category"><option value="auto">Auto</option><option value="tops">Top</option><option value="bottoms">Bottom</option><option value="one-pieces">One-piece</option></select></div>
@@ -580,7 +586,7 @@ const ReelEngine = (() => {
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const state = { me: null, uid: null, selfies: [], models: [], garments: [], generations: [], outfits: [], collages: [], shops: [], settings: {},
-    sel: { selfie: null, model: null, garment: null, src: "path" }, modelFilter: "all", urls: new Map(), blobs: new Map() };
+    sel: { selfie: null, model: null, garment: null, garments: [], src: "path", engine: "flux" }, flux: null, modelFilter: "all", urls: new Map(), blobs: new Map() };
   const DEFAULT_DISCLOSURE = "As an Amazon Associate I earn from qualifying purchases.";
   const SHOP_BASE = location.origin + location.pathname.replace(/index\.html$/, "").replace(/\/?$/, "/") + "shop.html?o=";
 
@@ -608,6 +614,7 @@ const ReelEngine = (() => {
         `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(p.label)} · ${p.credits} credit${p.credits > 1 ? "s" : ""}</option>`).join("");
       togglePresetOpts();
       $("login").classList.add("hidden"); $("app").classList.remove("hidden"); $("nav").classList.remove("hidden");
+      await probeFlux();
       await loadAll();
       api("/credits").then((c) => setUsage(state.me.used_today, state.me.daily_cap, c.credits.total)).catch(() => {});
     } catch (e) { $("loginMsg").textContent = e.message; await sb.auth.signOut(); }
@@ -678,6 +685,7 @@ const ReelEngine = (() => {
   // signed URLs (1 h), cached
   async function url(path) {
     if (!path) return "";
+    if (String(path).startsWith("data:") || String(path).startsWith("blob:")) return path;
     const c = state.urls.get(path); if (c && c.exp > Date.now()) return c.u;
     const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(path, 3600);
     if (error) return "";
@@ -805,9 +813,9 @@ const ReelEngine = (() => {
   }
 
   // ------------------------------------------------------------------ spending guard + runs
-  function confirmSpend(credits, what) {
+  function confirmSpend(credits, what, provider = "FASHN") {
     const left = state.me.daily_cap - state.me.used_today;
-    return confirm(`${what}\n\nThis will use ${credits} FASHN credit${credits > 1 ? "s" : ""}.\nToday: ${state.me.used_today}/${state.me.daily_cap} used, ${left} left in the daily limit.`);
+    return confirm(`${what}\n\nThis will use ${credits} ${provider} credit${credits > 1 ? "s" : ""}.\nToday: ${state.me.used_today}/${state.me.daily_cap} used, ${left} left in the daily limit.`);
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function runAndWait(path, body, onTick) {
@@ -823,6 +831,43 @@ const ReelEngine = (() => {
       if (Date.now() - t0 > 240000) throw new Error("Timed out waiting for FASHN — check again in a minute.");
     }
   }
+  // FLUX VTO v2 is a separate function (supabase/functions/flux-vto). A 404 means it is not
+  // deployed yet: the Try-On tab keeps today's FASHN button for a single item and shows
+  // "coming soon" when several items are selected.
+  async function probeFlux() {
+    state.flux = { ok: false, configured: false, credits: 1, max: 4, reason: "unknown" };
+    try {
+      const t = await token(); if (!t) return;
+      const r = await fetch(SUPABASE_URL + "/functions/v1/flux-vto", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + t, apikey: ANON_KEY, "content-type": "application/json" },
+        body: JSON.stringify({ probe: true }),
+      });
+      if (r.status === 404) { state.flux.reason = "missing"; return; }
+      const b = await r.json().catch(() => ({}));
+      const configured = !!(r.ok && b.ok && b.configured);
+      state.flux = { ok: configured, configured, credits: b.credits || 1, max: b.max_items || 4, reason: configured ? "" : (b.error || "not configured") };
+    } catch { state.flux.reason = "unreachable"; }
+  }
+  async function runFlux(body, onTick) {
+    onTick && onTick("FLUX is dressing the outfit…");
+    const t = await token(); if (!t) throw new Error("Signed out");
+    const r = await fetch(SUPABASE_URL + "/functions/v1/flux-vto", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + t, apikey: ANON_KEY, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 404) {
+      state.flux = { ok: false, configured: false, credits: 1, max: 4, reason: "missing" };
+      renderPickers();
+      throw new Error("FLUX try-on isn't deployed yet. HD (FASHN) still works for one item.");
+    }
+    const b = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(b.error || ("HTTP " + r.status));
+    if (b.used_today != null) setUsage(b.used_today, b.daily_cap ?? state.me.daily_cap);
+    return b;
+  }
+  const creditLabel = (n) => `${n} credit${n > 1 ? "s" : ""}`;
   function note(id, text, err) { const el = $(id); if (!el) return; el.innerHTML = (text && !err && /…/.test(text) ? '<span class="spinner"></span> ' : "") + esc(text); el.className = "msg " + (err ? "err" : "ok"); }
 
   // ------------------------------------------------------------------ sheets + tabs
@@ -1121,7 +1166,7 @@ const ReelEngine = (() => {
     $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) { await loadAll(); try { const n = await syncShopPagesForGarment(x.id); const m = await syncProductForGarment(x.id); if (n || m) note("gMsg", `Saved. ${n ? `Shop This Look page${n > 1 ? "s" : ""} updated.` : ""} ${m ? "Storefront find updated." : ""}`.trim()); } catch {} } };
     $("gStore").onclick = async () => { try { note("gMsg", "Updating storefront…"); if (productOf(x.id)?.published) { await unpublishProduct(x); note("gMsg", "Removed from the storefront."); } else { await publishProduct(x); note("gMsg", "Now on the storefront under Individual Finds."); } garmentSheet(x.id); } catch (e) { note("gMsg", e.message, true); } };
     if ($("gFav")) $("gFav").onclick = async () => { try { const pr = productOf(x.id); const { error } = await sb.from("shop_products").update({ featured: !pr.featured, updated_at: new Date().toISOString() }).eq("id", pr.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); garmentSheet(x.id); note("gMsg", pr.featured ? "Removed from My Favorites." : "Added to My Favorites."); } catch (e) { note("gMsg", e.message, true); } };
-    $("gTry").onclick = () => { state.sel.garment = x.id; state.sel.src = "path"; closeSheet(); renderPickers(); showTab("tryon"); };
+    $("gTry").onclick = () => { setGarmentSelection([x.id]); state.sel.src = "path"; closeSheet(); renderPickers(); showTab("tryon"); };
     $("gExtract").onclick = () => spendAction("/extract", cost("extract"), "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
     $("gBg").onclick = () => spendAction("/bgremove", cost("bgremove"), "Remove the background from the extracted clothing (transparent PNG).", x);
     $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await removeFiles([x.path, x.thumb_path, x.cutout_path, x.source_path]); await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
@@ -1166,19 +1211,90 @@ const ReelEngine = (() => {
     if (state.sel.selfie) return person("selfie", state.sel.selfie);
     return null;
   }
+  function selectedGarmentList() {
+    const max = state.flux?.max || 4;
+    if (!Array.isArray(state.sel.garments)) state.sel.garments = [];
+    if (state.sel.garment && !state.sel.garments.includes(state.sel.garment)) state.sel.garments.unshift(state.sel.garment);
+    state.sel.garments = state.sel.garments.filter((id, i) => id && state.sel.garments.indexOf(id) === i && garment(id) && !isApi(garment(id))).slice(0, max);
+    state.sel.garment = state.sel.garments[state.sel.garments.length - 1] || null;
+    return state.sel.garments.map(garment);
+  }
+  function setGarmentSelection(ids) {
+    state.sel.garments = [];
+    state.sel.garment = null;
+    const max = state.flux?.max || 4;
+    for (const id of ids || []) {
+      if (state.sel.garments.includes(id)) continue;
+      const g = garment(id);
+      if (!g || isApi(g)) continue;
+      if (state.sel.garments.length >= max) break;
+      state.sel.garments.push(id);
+    }
+    state.sel.garment = state.sel.garments[state.sel.garments.length - 1] || null;
+  }
+  function toggleGarment(id) {
+    const cur = (state.sel.garments || []).slice();
+    const i = cur.indexOf(id);
+    if (i >= 0) cur.splice(i, 1);
+    else {
+      const max = state.flux?.max || 4;
+      if (cur.length >= max) { note("runMsg", `Pick up to ${max} items. Tap a selected item to remove it.`, true); return; }
+      cur.push(id);
+    }
+    state.sel.src = "path";
+    setGarmentSelection(cur);
+    renderPickers();
+  }
+  function tryOnEngine(n) {
+    const fluxOk = !!(state.flux && state.flux.ok);
+    if (n >= 2) return "flux";
+    return fluxOk && state.sel.engine !== "fashn" ? "flux" : "fashn";
+  }
   function renderPickers() {
     const ps = $("pickSelfie"), pg = $("pickGarment");
     const people = [...state.selfies.map((s) => ({ k: "s", id: s.id, p: s.thumb_path || s.path, l: s.label || "My photo" })), ...state.models.map((m) => ({ k: "m", id: m.id, p: m.thumb_path || m.path, l: m.name }))];
     const cur = state.sel.model ? "m" + state.sel.model : state.sel.selfie ? "s" + state.sel.selfie : "";
+    const items = selectedGarmentList();
+    const order = new Map(state.sel.garments.map((id, i) => [id, i + 1]));
     ps.innerHTML = people.map((e) => `<button class="tile ${cur === e.k + e.id ? "sel" : ""}" data-k="${e.k}" data-id="${e.id}"><img data-path="${esc(e.p)}" alt=""><span class="cap">${esc(e.l)}</span></button>`).join("") || '<div class="empty">Add a photo or generate a model first</div>';
-    pg.innerHTML = ownGarments().map((g) => `<button class="tile contain ${state.sel.garment === g.id ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span></button>`).join("") || '<div class="empty">Add clothing first (Amazon-API products can\'t be used for try-on)</div>';
+    pg.innerHTML = ownGarments().map((g) => `<button type="button" class="tile contain ${order.has(g.id) ? "sel" : ""}" data-id="${g.id}"><img data-path="${esc(g.cutout_path || g.thumb_path || g.path)}" alt=""><span class="cap">${esc(g.name)}</span>${order.has(g.id) ? `<span class="badge">${order.get(g.id)}</span>` : ""}</button>`).join("") || '<div class="empty">Add clothing first (Amazon-API products can\'t be used for try-on)</div>';
     ps.querySelectorAll(".tile").forEach((t) => t.onclick = () => { if (t.dataset.k === "m") { state.sel.model = t.dataset.id; state.sel.selfie = null; } else { state.sel.selfie = t.dataset.id; state.sel.model = null; } renderPickers(); });
-    pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => { const g = garment(t.dataset.id); state.sel.garment = g.id; state.sel.src = "path"; renderPickers(); });   // product photo by default: keeps the real fit
-    const g = garment(state.sel.garment);
-    $("srcRow").classList.toggle("hidden", !(g && g.cutout_path));
-    const fl = fitLabel(g); $("fitRow").classList.toggle("hidden", !fl); $("fitNote").textContent = fl;
+    pg.querySelectorAll(".tile").forEach((t) => t.onclick = () => toggleGarment(t.dataset.id));
+    const n = items.length;
+    const fluxOk = !!(state.flux && state.flux.ok);
+    const credits = state.flux?.credits || 1;
+    const engine = tryOnEngine(n);
+    const who = selectedPerson();
+    $("pickHint").textContent = fluxOk
+      ? "Tap to add or remove. One item is a normal try-on. Two to four try on together with FLUX."
+      : "Tap to add or remove. One item uses HD try-on. Trying on several items at once is coming soon.";
+    $("srcRow").classList.toggle("hidden", !items.some((g) => g.cutout_path));
+    const fl = items.map(fitLabel).filter(Boolean).join(" ");
+    $("fitRow").classList.toggle("hidden", !fl); $("fitNote").textContent = fl;
     $("srcRow").querySelectorAll(".chip").forEach((c) => { c.classList.toggle("on", c.dataset.src === state.sel.src); c.onclick = () => { state.sel.src = c.dataset.src; renderPickers(); }; });
-    $("generate").disabled = !(selectedPerson() && g); $("p2m").disabled = !g;
+    $("engineRow").classList.toggle("hidden", !fluxOk);
+    $("engineChips").querySelectorAll("[data-engine]").forEach((c) => {
+      c.classList.toggle("on", c.dataset.engine === engine);
+      c.disabled = c.dataset.engine === "fashn" && n >= 2;
+      c.onclick = () => { if (c.disabled) return; state.sel.engine = c.dataset.engine; renderPickers(); };
+    });
+    $("engineNote").textContent = !fluxOk ? "" : engine === "flux"
+      ? (n >= 2 ? `${n} items in one FLUX pass, ${creditLabel(credits)}. Up to 4 items. FASHN one-by-one is on the outfit.` : `One FLUX pass, ${creditLabel(credits)}. HD keeps the FASHN quality options for a single item.`)
+      : "HD uses FASHN on this one item.";
+    if (engine === "flux" && fluxOk) { $("presetWrap").classList.add("hidden"); $("v16opts").classList.add("hidden"); $("maxopts").classList.remove("hidden"); }
+    else if (n <= 1) { $("presetWrap").classList.remove("hidden"); togglePresetOpts(); }
+    else { $("presetWrap").classList.add("hidden"); $("v16opts").classList.add("hidden"); $("maxopts").classList.add("hidden"); }
+    if (n >= 2) {
+      $("generate").textContent = fluxOk ? `Try on ${n} items · ${creditLabel(credits)}` : `Try on ${n} items · coming soon`;
+      $("generate").disabled = !(who && fluxOk);
+    } else if (n === 1 && engine === "flux") {
+      $("generate").textContent = `Generate try-on · ${creditLabel(credits)}`;
+      $("generate").disabled = !who;
+    } else {
+      $("generate").textContent = "Generate try-on";
+      $("generate").disabled = !(who && n === 1);
+    }
+    $("p2m").disabled = n !== 1;
     fillImgs(ps); fillImgs(pg);
   }
   function togglePresetOpts() { const isMax = $("preset").value.startsWith("max"); $("v16opts").classList.toggle("hidden", isMax); $("maxopts").classList.toggle("hidden", !isMax); }
@@ -1189,14 +1305,33 @@ const ReelEngine = (() => {
     $("reuseOut").onclick = async () => { await addSelfieFromBlob(await blobOf(r.path), g ? g.name : "AI me"); await loadAll(); alert("Saved under My Models → My photos."); };
   }
   $("generate").addEventListener("click", async () => {
-    const who = selectedPerson(), g = garment(state.sel.garment); const p = state.me.presets[$("preset").value];
+    const who = selectedPerson(), items = selectedGarmentList();
+    if (!who || !items.length) return;
+    const engine = tryOnEngine(items.length);
+    const meta = { selfie_id: who.kind === "selfie" ? who.id : null, model_id: who.kind === "model" ? who.id : null, garment_id: items[0].id };
+    if (engine === "flux") {
+      if (!state.flux?.ok) return;
+      const credits = state.flux.credits || 1;
+      const names = items.map((g) => g.name).join(", ");
+      const what = items.length > 1 ? `Try ${items.length} items on ${who.label}: ${names}.` : `Try "${items[0].name}" on ${who.label} (FLUX).`;
+      if (!confirmSpend(credits, what, "Studio")) return;
+      $("generate").disabled = true; $("result").classList.add("hidden"); note("runMsg", "Starting FLUX…");
+      try {
+        const r = await runFlux({ person_path: who.path, garment_ids: items.map((g) => g.id), source: state.sel.src === "cutout" ? "cutout" : "path",
+          instructions: $("prompt").value.trim(), keep_fit: $("fitAuto").checked, meta: { ...meta, kind: items.length > 1 ? "outfit_flux" : "tryon" } }, (t) => note("runMsg", t));
+        showResult(r, items[0]); note("runMsg", `Done — ${r.credits} credit used. Saved to My Photos.`); loadAll();
+      } catch (e) { note("runMsg", e.message, true); }
+      $("generate").disabled = false;
+      return;
+    }
+    const g = items[0]; const p = state.me.presets[$("preset").value];
     if (!confirmSpend(p.credits, `Try "${g.name}" on ${who.label} (${p.label}).`)) return;
     $("generate").disabled = true; $("result").classList.add("hidden"); note("runMsg", "Starting…");
     try {
       const r = await runAndWait("/run", { preset: $("preset").value, selfie_path: who.path,
         garment_path: state.sel.src === "cutout" && g.cutout_path ? g.cutout_path : g.path,
         category: $("category").value, garment_photo_type: $("gpt").value, prompt: withFit($("prompt").value.trim(), $("fitAuto").checked ? fitHint(g) : "") || undefined,
-        meta: { kind: "tryon", selfie_id: who.kind === "selfie" ? who.id : null, model_id: who.kind === "model" ? who.id : null, garment_id: g.id } }, (t) => note("runMsg", t));
+        meta: { ...meta, kind: "tryon" } }, (t) => note("runMsg", t));
       showResult(r, g); note("runMsg", `Done — ${r.credits} credit(s) used. Saved to My Photos.`); loadAll();
     } catch (e) { note("runMsg", e.message, true); }
     $("generate").disabled = false;
@@ -1237,9 +1372,12 @@ const ReelEngine = (() => {
     const kids = state.generations.filter((p) => p.parent_id === x.id);
     const versions = parent || kids.length ? [parent || x, ...(parent ? state.generations.filter((p) => p.parent_id === parent.id) : kids)] : [];
     const fromCredits = Math.min(...Object.entries(state.me.presets).filter(([k]) => k.startsWith("max")).map(([, v]) => v.credits));
+    const styleObj = x.style && typeof x.style === "object" ? x.style : null;
+    const multiNames = Array.isArray(styleObj?.garment_names) ? styleObj.garment_names.filter(Boolean) : [];
+    const presetLabel = x.preset === "flux_vto" ? "FLUX · all at once" : (x.preset || x.kind);
     openSheet(`<div class="chips" style="margin-bottom:8px"><button class="chip on" data-v="path">Photo</button>${parent ? `<button class="chip" data-p="${esc(parent.path)}">Original (before replace)</button>` : ""}${x.cutout_path ? '<button class="chip" data-v="cutout_path">Cutout</button>' : ""}</div>
       <img class="big" id="phImg" data-path="${esc(x.path)}" alt="">
-      <p class="kv" style="margin:8px 0">${esc(new Date(x.created_at).toLocaleString())} · ${esc(x.preset || x.kind)} · ${x.credits} credit(s)${x.kind === "replace" ? " · replaced item" : ""}${g ? " · " + esc(g.name) : ""}${o ? " · " + esc(o.name) : ""}</p>
+      <p class="kv" style="margin:8px 0">${esc(new Date(x.created_at).toLocaleString())} · ${esc(presetLabel)} · ${x.credits} credit(s)${x.kind === "replace" ? " · replaced item" : ""}${multiNames.length > 1 ? " · " + esc(multiNames.join(", ")) : g ? " · " + esc(g.name) : ""}${o ? " · " + esc(o.name) : ""}</p>
       ${fidelityLabel(x.style) ? `<p class="kv" style="margin:0 0 8px"><strong>${fidelityLabel(x.style)}</strong>${styleSummary(x.style) ? " · " + esc(styleSummary(x.style)) : ""} — ${x.style.fidelity === "inspiration" ? "AI styling preview of you; the linked products are the exact items." : "AI try-on of the real product photos; check colours and fit before calling it exact."}</p>` : ""}
       ${versions.length ? `<div style="margin-bottom:10px"><label>Versions (original first)</label><div class="strip" id="pVers">${versions.map((v) => `<button class="tile ${v.id === x.id ? "sel" : ""}" data-id="${v.id}"><img data-path="${esc(v.path)}" alt=""><span class="cap">${v.parent_id ? esc(garment(v.garment_id)?.name || "replaced") : "original"}</span></button>`).join("")}</div></div>` : ""}
       <div class="stack"><button class="btn" id="pSave">Save to Photos</button>
@@ -1383,28 +1521,64 @@ const ReelEngine = (() => {
   }
   function outfitTrySheet(o, items) {
     const p = state.me.presets; const pc = (k) => p[k].credits;
+    const fluxOk = !!(state.flux && state.flux.ok);
     const people = [...state.selfies.map((s) => ({ k: "selfie", id: s.id, p: s.thumb_path || s.path })), ...state.models.map((m) => ({ k: "model", id: m.id, p: m.thumb_path || m.path }))];
     let who = selectedPerson();
+    const fluxChip = fluxOk
+      ? `<button type="button" class="chip" data-m="flux">All at once · FLUX</button>`
+      : `<button type="button" class="chip" data-m="flux">All at once · coming soon</button>`;
     openSheet(`<h3>Try on: ${esc(o.name)}</h3><div class="stack">
       <div><label>Model</label><div class="strip" id="otSelfie">${people.map((e) => `<button class="tile ${who && who.kind === e.k && who.id === e.id ? "sel" : ""}" data-k="${e.k}" data-id="${e.id}"><img data-path="${esc(e.p)}" alt=""></button>`).join("")}</div></div>
-      <div><label>Quality</label><select id="otPreset">${Object.entries(p).filter(([k]) => k.startsWith("max")).map(([k, v]) => `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(v.label)} · ${v.credits}/pass</option>`).join("")}</select></div>
-      <div><label>Method</label><div class="chips"><button class="chip on" data-m="single">Single pass (collage as one product)</button><button class="chip" data-m="seq">Sequential (${items.length} passes)</button></div></div>
+      <div id="otPresetWrap"><label>Quality</label><select id="otPreset">${Object.entries(p).filter(([k]) => k.startsWith("max")).map(([k, v]) => `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(v.label)} · ${v.credits}/pass</option>`).join("")}</select></div>
+      <div><label>Method</label><div class="chips">${fluxChip}<button type="button" class="chip" data-m="seq">Sequential · FASHN HD (${items.length} passes)</button><button type="button" class="chip" data-m="single">Single pass (collage as one product)</button></div>
+        <p class="hint" style="margin:6px 0 0">All at once is one FLUX photo of the whole outfit. Sequential dresses one item at a time and keeps each step.</p></div>
       <p class="hint" id="otCost"></p>
       <button class="btn" id="otGo">Generate</button><div id="otMsg" class="msg"></div>
       <div class="steps" id="otSteps"></div></div>`);
-    let method = "single";
-    const refresh = () => { const c = pc($("otPreset").value); $("otCost").textContent = method === "single" ? `${c} credits · one FASHN run with all items on a white collage (experimental).` : `${c * items.length} credits · ${items.length} runs, each wearing the previous result. You can stop after any step.`; };
-    $("sheetBody").querySelectorAll("[data-m]").forEach((c) => c.onclick = () => { method = c.dataset.m; $("sheetBody").querySelectorAll("[data-m]").forEach((k) => k.classList.toggle("on", k === c)); refresh(); });
+    let method = fluxOk ? "flux" : "single";
+    const refresh = () => {
+      const c = pc($("otPreset").value);
+      const fluxCredits = state.flux?.credits || 1;
+      const max = state.flux?.max || 4;
+      const n = Math.min(items.length, max);
+      $("sheetBody").querySelectorAll("[data-m]").forEach((k) => k.classList.toggle("on", k.dataset.m === method));
+      $("otPresetWrap").classList.toggle("hidden", method === "flux");
+      if (method === "flux") {
+        const extra = items.length > n ? ` The first ${n} items are used.` : "";
+        $("otCost").textContent = `${creditLabel(fluxCredits)} · one FLUX try-on of ${n} item${n === 1 ? "" : "s"} together (recommended).${extra}`;
+        $("otGo").textContent = `Try on ${n} item${n === 1 ? "" : "s"} · ${creditLabel(fluxCredits)}`;
+        $("otGo").disabled = !fluxOk;
+      } else if (method === "single") {
+        $("otCost").textContent = `${c} credits · one FASHN run with all items on a white collage (experimental).`;
+        $("otGo").textContent = "Generate";
+        $("otGo").disabled = false;
+      } else {
+        $("otCost").textContent = `${c * items.length} credits · ${items.length} FASHN runs, each wearing the previous result. You can stop after any step.`;
+        $("otGo").textContent = "Generate";
+        $("otGo").disabled = false;
+      }
+    };
+    $("sheetBody").querySelectorAll("[data-m]").forEach((c) => c.onclick = () => {
+      if (c.dataset.m === "flux" && !fluxOk) { note("otMsg", "FLUX all-at-once try-on isn't available yet. Sequential and the collage pass still work.", true); return; }
+      method = c.dataset.m; refresh();
+    });
     $("otPreset").onchange = refresh; refresh();
     $("otSelfie").querySelectorAll(".tile").forEach((t) => t.onclick = () => { who = person(t.dataset.k, t.dataset.id); $("otSelfie").querySelectorAll(".tile").forEach((k) => k.classList.toggle("sel", k === t)); });
     $("otGo").onclick = async () => {
       if (!who) { note("otMsg", "Pick a model.", true); return; }
-      const preset = $("otPreset").value, c = pc(preset); const total = method === "single" ? c : c * items.length;
-      if (!confirmSpend(total, method === "single" ? `Single-pass outfit try-on (${items.length} items).` : `Sequential outfit try-on, ${items.length} passes.`)) return;
+      const preset = $("otPreset").value, c = pc(preset);
+      const fluxCredits = state.flux?.credits || 1;
+      const use = method === "flux" ? items.slice(0, state.flux?.max || 4) : items;
+      const total = method === "flux" ? fluxCredits : method === "single" ? c : c * items.length;
+      const what = method === "flux" ? `FLUX outfit try-on, ${use.length} items at once.` : method === "single" ? `Single-pass outfit try-on (${items.length} items).` : `Sequential outfit try-on, ${items.length} passes.`;
+      if (!confirmSpend(total, what, method === "flux" ? "Studio" : "FASHN")) return;
       $("otGo").disabled = true; $("otSteps").innerHTML = "";
       const meta = { selfie_id: who.kind === "selfie" ? who.id : null, model_id: who.kind === "model" ? who.id : null, outfit_id: o.id };
       try {
-        if (method === "single") {
+        if (method === "flux") {
+          const r = await runFlux({ person_path: who.path, garment_ids: use.map((g) => g.id), source: "path", instructions: "", keep_fit: true, meta: { ...meta, kind: "outfit_flux", garment_id: use[0].id } }, (t) => note("otMsg", t));
+          $("otSteps").innerHTML = `<div class="tile"><img data-path="${esc(r.path)}" alt=""></div>`; fillImgs($("otSteps")); note("otMsg", `Done — ${r.credits} credit. Saved to My Photos.`);
+        } else if (method === "single") {
           note("otMsg", "Building collage…");
           const blob = await renderLayout({ ...makeLayout(items.map((g) => g.id), "grid"), bg: "#ffffff" }, 1400);
           const r = await runAndWait("/run", { preset, selfie_path: who.path, garment_image: await toDataUrl(blob), prompt: withFit("wear all of these items together", ...items.map(fitHint)), meta: { ...meta, kind: "outfit_single" } }, (t) => note("otMsg", t));
@@ -3090,6 +3264,9 @@ const ReelEngine = (() => {
     $("changepw").onclick = async () => { const pw = $("newpw").value; if (pw.length < 12) { note("acctMsg", "12+ characters, please.", true); return; } const { error } = await sb.auth.updateUser({ password: pw }); note("acctMsg", error ? error.message : "Password changed.", !!error); };
     $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   });
+  if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    window.__studio = { state, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList };
+  }
 })();
 </script>
 </body>

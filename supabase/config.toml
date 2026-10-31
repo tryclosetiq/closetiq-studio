@@ -1,0 +1,6 @@
+# ClosetIQ Studio — FLUX VTO only. The existing `studio` function is deployed
+# outside this repo and is not managed by this file.
+project_id = "yjjdzugecimjwgwtkwyw"
+
+[functions.flux-vto]
+verify_jwt = true
