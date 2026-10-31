@@ -1,0 +1,12 @@
+{
+  "name": "closetiq-studio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/garment-grid.test.mjs test/flux-handler.test.mjs test/ui-tryon.test.mjs"
+  },
+  "devDependencies": {
+    "imagescript": "^1.3.0",
+    "puppeteer-core": "^24.15.0"
+  }
+}
