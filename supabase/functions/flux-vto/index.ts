@@ -11,7 +11,7 @@
 // the generations columns after the first real try-on.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { Image } from "npm:imagescript@1.3.0";
+import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { handleFlux, insertGenerationFallback, safeStoragePath } from "../_shared/flux_handler.mjs";
 
 const BUCKET = "studio";
