@@ -76,6 +76,12 @@
   .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:40;display:none}
   .sheet{position:fixed;left:0;right:0;bottom:0;max-height:92dvh;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));z-index:41;display:none;box-shadow:0 -6px 30px rgba(0,0,0,.2)}
   .sheet.open,.sheet-bg.open{display:block}
+  #adjuster{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;flex-direction:column;gap:8px;padding:calc(8px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom))}
+  #adjStage{flex:1;min-height:180px;display:grid;place-items:center;touch-action:none}
+  #adjFrame{position:relative;overflow:hidden;background:#1c1915;border-radius:12px;touch-action:none}
+  #adjImg{position:absolute;left:50%;top:50%;max-width:none;transform-origin:center center;pointer-events:none;-webkit-user-drag:none;user-select:none}
+  #adjHandle{position:absolute;width:36px;height:36px;right:-8px;bottom:-8px;border-radius:50%;background:var(--accent);border:3px solid #fff;touch-action:none}
+  #csList{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
   .sheet .handle{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
   .big{width:100%;border-radius:12px;display:block;background:var(--soft)}
   .big.contain{object-fit:contain;max-height:60dvh;background:#fff}
@@ -300,6 +306,15 @@
 
 <div class="sheet-bg" id="sheetBg"></div>
 <div class="sheet" id="sheet"><div class="handle"></div><div id="sheetBody"></div></div>
+<section id="adjuster" class="hidden" aria-label="Adjust photo">
+  <div class="ed-top"><button class="btn secondary small" type="button" id="adjCancel">Cancel</button><strong id="adjTitle" style="flex:1;text-align:center">Adjust photo</strong><button class="btn small" type="button" id="adjSave">Save</button></div>
+  <div id="adjStage"><div id="adjFrame"><img id="adjImg" alt=""><div id="adjHandle" hidden></div></div></div>
+  <div class="chips" id="adjAspect"><button type="button" class="chip" data-a="4:5">4:5</button><button type="button" class="chip" data-a="1:1">1:1</button><button type="button" class="chip" data-a="9:16">9:16</button><button type="button" class="chip" data-a="free">Free</button></div>
+  <div class="row" style="align-items:center"><button class="btn secondary small" type="button" id="adjRot">Rotate</button><label class="inline" style="flex:1">Brightness <input id="adjBright" type="range" min="-40" max="40" value="0" aria-label="Brightness"></label></div>
+  <button class="btn secondary" type="button" id="adjReset">Reset to original</button>
+  <p class="kv" style="margin:0">Drag to move. Pinch to zoom. The original is kept until you reset.</p>
+  <div id="adjMsg" class="msg"></div>
+</section>
 
 <!-- Clothing importer -->
 <section id="importer" class="hidden">
@@ -624,11 +639,21 @@ const ReelEngine = (() => {
   const cost = (k) => state.me.actions[k];
 
   // ------------------------------------------------------------------ data
+  // Supabase returns at most 1000 rows per request. Page through so the closet (earrings included) is complete.
+  async function allFrom(table, orderCol, ascending) {
+    const size = 1000, rows = [];
+    for (let from = 0; ; from += size) {
+      const { data, error } = await sb.from(table).select("*").order(orderCol, { ascending }).range(from, from + size - 1);
+      if (error) return { data: rows.length ? rows : null, error };
+      rows.push(...(data || []));
+      if (!data || data.length < size) return { data: rows, error: null };
+    }
+  }
   async function loadAll() {
     const [s, m, g, gen, o, oi, c, sp, st] = await Promise.all([
       sb.from("selfies").select("*").order("created_at", { ascending: false }),
       sb.from("models").select("*").order("created_at", { ascending: false }),
-      sb.from("garments").select("*").order("created_at", { ascending: false }),
+      allFrom("garments", "created_at", false),
       sb.from("generations").select("*").order("created_at", { ascending: false }),
       sb.from("outfits").select("*").order("updated_at", { ascending: false }),
       sb.from("outfit_items").select("*").order("position"),
@@ -1043,8 +1068,9 @@ const ReelEngine = (() => {
     input = (input || "").trim(); if (!input) return { url: "", asin: null, note: "" };
     try {
       const u = new URL(input), host = u.hostname.toLowerCase();
-      if (/(^|\.)(amzn\.(to|com|eu|asia|in)|a\.co)$/.test(host)) return { url: input, asin: null, note: "Short link kept — it already carries its tag." };
-      if (!/(^|\.)amazon\.[a-z.]+$/.test(host)) return { url: input, asin: null, note: "Not an Amazon link — saved as is." };
+      const kind = isAmazonHost(host);
+      if (kind === "short") { if (u.protocol === "http:") u.protocol = "https:"; return { url: u.protocol === "https:" ? u.toString() : input, asin: null, note: "Short link kept — it already carries its tag." }; }
+      if (kind !== "store") return { url: input, asin: null, note: "Not an Amazon link — saved as is." };
       const m = u.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Z0-9]{10})(?=[/?#]|$)/i) || u.pathname.match(/\/([B][0-9A-Z]{9})(?=[/?#]|$)/i);
       const asin = m ? m[1].toUpperCase() : null, existing = u.searchParams.get("tag");
       if (existing && tag && existing !== tag) return { url: input, asin, note: `Kept the link's existing tag "${existing}" (Amazon allows one tag per link).` };
@@ -1150,6 +1176,7 @@ const ReelEngine = (() => {
         ${(() => { const pr = productOf(x.id), on = !!(pr && pr.published); return `<div class="card" style="margin:0"><label>Storefront · Individual Finds</label>
           <p class="kv" style="margin:4px 0 8px">${on ? `On the storefront as “${esc(pr.name)}” (${esc((PRODUCT_CATS.find(([k]) => k === pr.category) || ["", pr.category])[1])})${pr.featured ? " · in My Favorites" : ""}.` : productReady(x) ? "Not on the storefront yet. Needs nothing more — tap to show it." : "To show this item it needs a name, an Amazon link and a cutout (or permission to show the original photo)."}</p>
           <div class="row" style="flex-wrap:wrap"><button class="btn ${on ? "secondary" : ""} small" id="gStore" ${!on && !productReady(x) ? "disabled" : ""}>${on ? "Remove from storefront" : "Show in Individual Finds"}</button>${on ? `<button class="btn secondary small" id="gFav">${pr.featured ? "Remove from My Favorites" : "Add to My Favorites"}</button>` : ""}</div></div>`; })()}
+        <button class="btn secondary" id="gAdjust">Adjust photo</button>
         <button class="btn secondary" id="gTry">Try on</button>
         <button class="btn secondary" id="gExtract">${x.cutout_path ? "Redo extraction" : "Extract clothing only"} · ${cost("extract")} credit</button>
         <button class="btn secondary" id="gBg" ${x.cutout_path ? "" : "disabled"}>Make background transparent · ${cost("bgremove")} credit</button>
@@ -1167,6 +1194,19 @@ const ReelEngine = (() => {
     $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) { await loadAll(); try { const n = await syncShopPagesForGarment(x.id); const m = await syncProductForGarment(x.id); if (n || m) note("gMsg", `Saved. ${n ? `Shop This Look page${n > 1 ? "s" : ""} updated.` : ""} ${m ? "Storefront find updated." : ""}`.trim()); } catch {} } };
     $("gStore").onclick = async () => { try { note("gMsg", "Updating storefront…"); if (productOf(x.id)?.published) { await unpublishProduct(x); note("gMsg", "Removed from the storefront."); } else { await publishProduct(x); note("gMsg", "Now on the storefront under Individual Finds."); } garmentSheet(x.id); } catch (e) { note("gMsg", e.message, true); } };
     if ($("gFav")) $("gFav").onclick = async () => { try { const pr = productOf(x.id); const { error } = await sb.from("shop_products").update({ featured: !pr.featured, updated_at: new Date().toISOString() }).eq("id", pr.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); garmentSheet(x.id); note("gMsg", pr.featured ? "Removed from My Favorites." : "Added to My Favorites."); } catch (e) { note("gMsg", e.message, true); } };
+    $("gAdjust").onclick = async () => {
+      try {
+        note("gMsg", "Opening…");
+        if (!x.source_path) await ensureStudioOriginal(x.path);
+        openAdjuster({ title: "Adjust photo", blob: await blobOf(x.path), onReset: async () => {
+          const orig = (x.source_path && await readStudioBlob(x.source_path)) || await readStudioBlob(originalPath(x.path));
+          if (!orig) return null;
+          await upload(x.path, await imageTypedBlob(orig));
+          if (x.thumb_path) { const thumb = await shrink(orig, 480, "image/jpeg", 0.85); if (thumb) await upload(x.thumb_path, thumb); }
+          state.urls.delete(x.path); state.blobs.delete(x.path); return orig;
+        }, onSave: async (out) => { await saveStudioEdit(x.path, out, x.thumb_path); await loadAll(); garmentSheet(x.id); note("gMsg", "Photo updated. Reset brings back the original."); } });
+      } catch (e) { note("gMsg", e.message, true); }
+    };
     $("gTry").onclick = () => { setGarmentSelection([x.id]); state.sel.src = "path"; closeSheet(); renderPickers(); showTab("tryon"); };
     $("gExtract").onclick = () => spendAction("/extract", cost("extract"), "Recreate just the clothing from this photo (FASHN Edit, experimental).", x);
     $("gBg").onclick = () => spendAction("/bgremove", cost("bgremove"), "Remove the background from the extracted clothing (transparent PNG).", x);
@@ -1366,6 +1406,148 @@ const ReelEngine = (() => {
     g.querySelectorAll(".tile").forEach((t) => t.onclick = () => photoSheet(t.dataset.id));
     fillImgs(g);
   }
+  function originalPath(path) { return String(path || "").replace(/(\.[a-z0-9]+)$/i, "-original$1"); }
+  async function readStudioBlob(path) {
+    if (!path) return null;
+    const signed = await url(path);
+    if (!signed) return null;
+    const res = await fetch(signed);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob || !blob.size) return null;
+    try { await loadImg(URL.createObjectURL(await imageTypedBlob(blob))); } catch { return null; }
+    return blob;
+  }
+  async function ensureStudioOriginal(path) {
+    const orig = originalPath(path);
+    const existing = await readStudioBlob(orig);
+    if (existing) return existing;
+    const cur = await readStudioBlob(path);
+    if (!cur) throw new Error("That photo could not be opened.");
+    await upload(orig, await imageTypedBlob(cur));
+    return cur;
+  }
+  async function saveStudioEdit(path, blob, thumbPath) {
+    await ensureStudioOriginal(path);
+    const jpeg = await jpegCover(blob);
+    await upload(path, jpeg);
+    if (thumbPath) { const thumb = await shrink(jpeg, 480, "image/jpeg", 0.85); if (thumb) await upload(thumbPath, thumb); }
+    state.blobs.delete(path); state.urls.delete(path);
+    if (thumbPath) { state.blobs.delete(thumbPath); state.urls.delete(thumbPath); }
+  }
+  async function resetStudioEdit(path, thumbPath) {
+    const orig = await readStudioBlob(originalPath(path));
+    if (!orig) throw new Error("No original is saved for this photo yet.");
+    await upload(path, await imageTypedBlob(orig));
+    if (thumbPath) { const thumb = await shrink(orig, 480, "image/jpeg", 0.85); if (thumb) await upload(thumbPath, thumb); }
+    state.blobs.delete(path); state.urls.delete(path);
+    return orig;
+  }
+  // Full-screen crop. Pinch zooms, one finger pans, presets set the frame. The file already stored is copied aside once and is not overwritten.
+  function openAdjuster({ blob, title, onSave, onReset }) {
+    const frame = $("adjFrame"), img = $("adjImg"), handle = $("adjHandle");
+    const st = { rot: 0, zoom: 1, panX: 0, panY: 0, bright: 0, aspect: "4:5", free: null, img: null, session: blob, busy: false };
+    $("adjTitle").textContent = title || "Adjust photo";
+    $("adjMsg").textContent = ""; $("adjSave").disabled = false; $("adjBright").value = "0";
+    $("adjuster").classList.remove("hidden"); document.body.style.overflow = "hidden";
+    const aspects = { "4:5": [4, 5], "1:1": [1, 1], "9:16": [9, 16] };
+    const oriented = () => st.rot % 180 ? [st.img.naturalHeight, st.img.naturalWidth] : [st.img.naturalWidth, st.img.naturalHeight];
+    const frameBox = () => {
+      const maxW = Math.min(frame.parentElement.clientWidth || window.innerWidth - 24, 520);
+      const maxH = Math.max(180, Math.min(window.innerHeight * 0.5, 640));
+      let aw, ah;
+      if (st.aspect === "free") { const r = st.free || (oriented()[0] / oriented()[1]); aw = r; ah = 1; }
+      else { [aw, ah] = aspects[st.aspect]; }
+      let w = maxW, h = w * ah / aw;
+      if (h > maxH) { h = maxH; w = h * aw / ah; }
+      return { w: Math.max(80, w), h: Math.max(80, h) };
+    };
+    const paint = () => {
+      if (!st.img) return;
+      const box = frameBox();
+      frame.style.width = box.w + "px"; frame.style.height = box.h + "px";
+      const [bw, bh] = oriented();
+      const cover = Math.max(box.w / bw, box.h / bh);
+      img.style.width = (st.img.naturalWidth * cover * st.zoom) + "px";
+      img.style.height = (st.img.naturalHeight * cover * st.zoom) + "px";
+      img.style.transform = `translate(calc(-50% + ${st.panX}px), calc(-50% + ${st.panY}px)) rotate(${st.rot}deg)`;
+      img.style.filter = `brightness(${1 + st.bright / 100})`;
+      handle.hidden = st.aspect !== "free";
+    };
+    const loadBlob = async (b) => {
+      const typed = await imageTypedBlob(b);
+      const u = URL.createObjectURL(typed);
+      st.img = await loadImg(u);
+      img.src = u;
+      paint();
+    };
+    const pts = new Map(); let pinch = null;
+    const pinchNow = () => { const [a, b] = [...pts.values()]; const dx = a.x - b.x, dy = a.y - b.y; return { dist: Math.hypot(dx, dy) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; };
+    frame.onpointerdown = (e) => {
+      if (e.target === handle) return;
+      frame.setPointerCapture(e.pointerId);
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) { const n = pinchNow(); pinch = { ...n, zoom: st.zoom, panX: st.panX, panY: st.panY }; }
+    };
+    frame.onpointermove = (e) => {
+      if (!pts.has(e.pointerId)) return;
+      const prev = pts.get(e.pointerId);
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 1 && !pinch) { st.panX += e.clientX - prev.x; st.panY += e.clientY - prev.y; }
+      else if (pts.size >= 2 && pinch) { const n = pinchNow(); st.zoom = Math.min(6, Math.max(1, pinch.zoom * (n.dist / pinch.dist))); st.panX = pinch.panX + (n.mx - pinch.mx); st.panY = pinch.panY + (n.my - pinch.my); }
+      paint();
+    };
+    const endPt = (e) => { pts.delete(e.pointerId); pinch = null; };
+    frame.onpointerup = endPt; frame.onpointercancel = endPt;
+    handle.onpointerdown = (e) => { e.stopPropagation(); handle.setPointerCapture(e.pointerId); handle._drag = { x: e.clientX, y: e.clientY, ratio: st.free || (oriented()[0] / oriented()[1]) }; };
+    handle.onpointermove = (e) => {
+      if (!handle._drag) return;
+      const box = frame.getBoundingClientRect();
+      const w = Math.max(80, box.width + (e.clientX - handle._drag.x));
+      const h = Math.max(80, box.height + (e.clientY - handle._drag.y));
+      st.free = w / h; st.aspect = "free"; paint();
+      $("adjAspect").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.a === "free"));
+    };
+    handle.onpointerup = () => { handle._drag = null; };
+    const setAspect = (a) => { st.aspect = a; st.zoom = 1; st.panX = 0; st.panY = 0; if (a === "free") st.free = oriented()[0] / oriented()[1]; $("adjAspect").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.a === a)); paint(); };
+    $("adjAspect").querySelectorAll(".chip").forEach((c) => c.onclick = () => setAspect(c.dataset.a));
+    $("adjRot").onclick = () => { st.rot = (st.rot + 90) % 360; st.panX = 0; st.panY = 0; paint(); };
+    $("adjBright").oninput = () => { st.bright = +$("adjBright").value; paint(); };
+    $("adjCancel").onclick = () => { $("adjuster").classList.add("hidden"); document.body.style.overflow = ""; };
+    $("adjReset").onclick = async () => {
+      try {
+        note("adjMsg", "Restoring original…");
+        const orig = (onReset ? await onReset() : null) || st.session;
+        if (!orig) throw new Error("No original is saved yet.");
+        st.rot = 0; st.zoom = 1; st.panX = 0; st.panY = 0; st.bright = 0; $("adjBright").value = "0";
+        await loadBlob(orig); setAspect("4:5"); note("adjMsg", "Original restored. Save to keep it.");
+      } catch (e) { note("adjMsg", e.message, true); }
+    };
+    $("adjSave").onclick = async () => {
+      if (st.busy || !st.img) return; st.busy = true; $("adjSave").disabled = true; note("adjMsg", "Saving…");
+      try {
+        const box = frame.getBoundingClientRect();
+        const k = Math.min(4, Math.max(2, 1080 / Math.max(box.width, box.height)));
+        const outW = Math.max(1, Math.round(box.width * k)), outH = Math.max(1, Math.round(box.height * k));
+        const [bw, bh] = oriented();
+        const cover = Math.max(box.width / bw, box.height / bh);
+        const c = document.createElement("canvas"); c.width = outW; c.height = outH;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, outW, outH);
+        ctx.translate(outW / 2 + st.panX * k, outH / 2 + st.panY * k);
+        ctx.rotate(st.rot * Math.PI / 180);
+        ctx.scale(cover * st.zoom * k, cover * st.zoom * k);
+        ctx.filter = `brightness(${1 + st.bright / 100})`;
+        ctx.drawImage(st.img, -st.img.naturalWidth / 2, -st.img.naturalHeight / 2, st.img.naturalWidth, st.img.naturalHeight);
+        const out = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.92));
+        if (!out) throw new Error("This phone could not save the photo.");
+        $("adjuster").classList.add("hidden"); document.body.style.overflow = "";
+        await onSave(out);
+      } catch (e) { note("adjMsg", e.message, true); $("adjSave").disabled = false; st.busy = false; }
+    };
+    setAspect("4:5");
+    loadBlob(blob).catch((e) => note("adjMsg", e.message || "That image could not be read.", true));
+  }
   function photoSheet(id) {
     const x = state.generations.find((p) => p.id === id); if (!x) return;
     const g = garment(x.garment_id), o = state.outfits.find((q) => q.id === x.outfit_id);
@@ -1382,6 +1564,7 @@ const ReelEngine = (() => {
       ${fidelityLabel(x.style) ? `<p class="kv" style="margin:0 0 8px"><strong>${fidelityLabel(x.style)}</strong>${styleSummary(x.style) ? " · " + esc(styleSummary(x.style)) : ""} — ${x.style.fidelity === "inspiration" ? "AI styling preview of you; the linked products are the exact items." : "AI try-on of the real product photos; check colours and fit before calling it exact."}</p>` : ""}
       ${versions.length ? `<div style="margin-bottom:10px"><label>Versions (original first)</label><div class="strip" id="pVers">${versions.map((v) => `<button class="tile ${v.id === x.id ? "sel" : ""}" data-id="${v.id}"><img data-path="${esc(v.path)}" alt=""><span class="cap">${v.parent_id ? esc(garment(v.garment_id)?.name || "replaced") : "original"}</span></button>`).join("")}</div></div>` : ""}
       <div class="stack"><button class="btn" id="pSave">Save to Photos</button>
+        <button class="btn secondary" id="pAdjust">Adjust photo</button>
         <button class="btn secondary" id="pReplace">Replace one item · from ${fromCredits} credit</button>
         <button class="btn secondary" id="pCut">${x.cutout_path ? "Redo person cutout" : "Person cutout for collages"} · ${cost("bgremove")} credit</button>
         <button class="btn secondary" id="pReuse">Use as model for another try-on</button>
@@ -1390,6 +1573,7 @@ const ReelEngine = (() => {
     $("sheetBody").querySelectorAll(".chip").forEach((c) => c.onclick = async () => { $("sheetBody").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === c)); $("phImg").src = await url(c.dataset.p || x[c.dataset.v]); });
     if (versions.length) $("pVers").querySelectorAll(".tile").forEach((t) => t.onclick = () => { if (t.dataset.id !== x.id) photoSheet(t.dataset.id); });
     $("pSave").onclick = async () => saveToPhotos(await blobOf(x.path), "closetiq-studio.jpg");
+    $("pAdjust").onclick = async () => { try { note("pMsg", "Opening…"); await ensureStudioOriginal(x.path); openAdjuster({ title: "Adjust photo", blob: await blobOf(x.path), onReset: () => resetStudioEdit(x.path), onSave: async (out) => { await saveStudioEdit(x.path, out); await loadAll(); photoSheet(id); note("pMsg", "Photo updated. Reset brings back the original."); } }); } catch (e) { note("pMsg", e.message, true); } };
     $("pReplace").onclick = () => replaceSheet(x);
     $("pCut").onclick = async () => { if (!confirmSpend(cost("bgremove"), "Remove the background around the person.")) return; try { note("pMsg", "Cutting out…"); await runAndWait("/bgremove", { target: "generation", id: x.id }, (t) => note("pMsg", t)); await loadAll(); photoSheet(id); note("pMsg", "Cutout ready."); } catch (e) { note("pMsg", e.message, true); } };
     $("pReuse").onclick = () => { state.sel.model = "gen:" + x.id; state.sel.selfie = null; closeSheet(); renderPickers(); showTab("tryon"); };
@@ -1818,9 +2002,22 @@ const ReelEngine = (() => {
     openSheet(`<h3>${esc(c.name)}</h3>
       <p class="kv" style="margin:0 0 10px">${esc(mode)} · ${items} item${items === 1 ? "" : "s"} · ${c.preview_path ? "saved " + esc(new Date(c.updated_at).toLocaleString()) : "never saved (opened " + esc(new Date(c.created_at).toLocaleString()) + ")"}${sp?.published ? " · Shop page published" : ""}</p>
       <div class="stack"><button class="btn" id="cmOpen">Open</button>
+        ${(c.layout?.image || c.preview_path) ? '<button class="btn secondary" id="cmAdjust">Adjust photo</button>' : ""}
         ${c.layout?.layers ? '<button class="btn secondary" id="cmAmazon">Share to Amazon</button>' : ""}
         <button class="btn danger" id="cmDel">Delete collage</button></div>`);
     $("cmOpen").onclick = () => { closeSheet(); openEditor(c); };
+    if ($("cmAdjust")) $("cmAdjust").onclick = async () => {
+      const path = c.layout?.image || c.preview_path;
+      try {
+        note("colMsg", "Opening…");
+        await ensureStudioOriginal(path);
+        openAdjuster({ title: "Adjust photo", blob: await blobOf(path), onReset: () => resetStudioEdit(path, c.preview_path && c.preview_path !== path ? c.preview_path : null), onSave: async (out) => {
+          await saveStudioEdit(path, out, c.preview_path && c.preview_path !== path ? c.preview_path : null);
+          if (c.preview_path === path) { /* preview is the same file */ }
+          await loadAll(); note("colMsg", "Photo updated. Reset brings back the original.");
+        } });
+      } catch (e) { note("colMsg", e.message, true); }
+    };
     if ($("cmAmazon")) $("cmAmazon").onclick = () => amazonShareSheet(c, c.layout);
     $("cmDel").onclick = () => { closeSheet(); deleteCollages([c.id]); };
   }
@@ -2527,13 +2724,35 @@ const ReelEngine = (() => {
     }
     return out;
   }
-  const amazonLink = (u) => /^https:\/\/([a-z0-9-]+\.)*(amazon\.[a-z.]+|amzn\.(to|com|eu|asia|in)|a\.co)\//i.test(u || "");
+  const amazonLink = (u) => isAmazonLink(u);
+  // Every closet row can be added. A blank name still shows (brand or category), and no category is dropped.
+  function closetChoices(garments, usedIds) {
+    const used = usedIds instanceof Set ? usedIds : new Set(usedIds || []);
+    return (garments || []).filter((g) => g && g.id && !used.has(g.id));
+  }
+  function closetMatches(g, q, cat) {
+    if (!g) return false;
+    if (cat && cat !== "all" && (g.category || "other") !== cat) return false;
+    const query = (q || "").trim().toLowerCase();
+    if (!query) return true;
+    return `${g.name || ""} ${g.brand || ""} ${g.category || ""} ${g.notes || ""}`.toLowerCase().includes(query);
+  }
+  function savedShopLink(g) {
+    const raw = ((g && (g.affiliate_url || g.product_url)) || "").trim();
+    if (!raw) return null;
+    const t = tagAmazon(raw, state.settings.amazon_tag);
+    if (!t.url || !amazonLink(t.url)) return null;
+    return t;
+  }
   async function shopItemFromGarment(sp, g) {
-    if (!(g.name || "").trim()) throw new Error("This item needs a name first.");
+    const label = itemLabel(g);
     const base = `${state.uid}/${sp.slug}`;
+    const link = savedShopLink(g);
+    const url = link ? link.url : (g.affiliate_url || "");
+    const price = g.price_display ? { price: g.price_display, price_at: g.api_fetched_at || g.price_at || null } : {};
     if (isApi(g)) {
-      if (!shopEligible(g, !!g.image_url)) throw new Error("This item needs an Amazon link.");
-      return { garment_id: g.id, name: shortName(g.name) || g.name, full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: null, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null };
+      if (!shopEligible(g, !!g.image_url) && !url) throw new Error("This item needs an Amazon link.");
+      return { garment_id: g.id, name: shortName(g.name) || label, full_name: g.name || label, brand: g.brand || "", url, hotspot: null, image_path: null, image_url: g.image_url || null, ...price };
     }
     const src = publishableSrc(g);
     let image_path = null;
@@ -2544,8 +2763,8 @@ const ReelEngine = (() => {
         if (blob) { image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
       } catch (e) { console.warn("look item image", e); }
     }
-    if (!shopEligible(g, !!image_path)) throw new Error("Add an Amazon link on the item, or a cutout, before it can go on the look page.");
-    return { garment_id: g.id, name: shortName(g.name) || g.name, full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: null, image_path };
+    if (!shopEligible({ ...g, affiliate_url: url || g.affiliate_url }, !!image_path) && !url && !image_path && !(g.image_url)) throw new Error("This item needs a photo or an Amazon link before it can go on the look page.");
+    return { garment_id: g.id, name: shortName(g.name) || label, full_name: g.name || label, brand: g.brand || "", url, hotspot: null, image_path, ...price };
   }
   async function rememberOnOutfit(sp, gid) {
     const o = lookOutfit(sp); if (!o || (o.items || []).includes(gid)) return;
@@ -2559,13 +2778,34 @@ const ReelEngine = (() => {
     if (error) throw new Error(error.message);
     await loadAll();
   }
-  async function addLookGarment(sp, gid) {
+  async function addLookGarment(sp, gid, linkOverride) {
     const g = garment(gid); if (!g) throw new Error("That item is no longer in My Clothing.");
     const items = [...(sp.items || [])];
     if (items.some((it) => it.garment_id === gid)) throw new Error("Already on this look.");
-    items.push(await shopItemFromGarment(sp, g));
+    const saved = savedShopLink(g);
+    if (!saved && !(linkOverride && linkOverride.url)) return { needLink: true };
+    let use = g;
+    if (!saved && linkOverride) {
+      const t = tagAmazon(linkOverride.url, state.settings.amazon_tag);
+      if (!t.url || !amazonLink(t.url)) throw new Error("Paste an Amazon product link.");
+      use = { ...g, affiliate_url: t.url, product_url: linkOverride.url.trim(), asin: t.asin || g.asin || null };
+      if (linkOverride.saveBack !== false) {
+        const { error } = await sb.from("garments").update({ affiliate_url: t.url, product_url: linkOverride.url.trim(), asin: use.asin }).eq("id", g.id).eq("user_id", state.uid);
+        if (error) {
+          const retry = await sb.from("garments").update({ affiliate_url: t.url, product_url: linkOverride.url.trim(), asin: use.asin }).eq("id", g.id);
+          if (retry.error) throw new Error(retry.error.message);
+        }
+        await loadAll();
+        use = garment(gid) || use;
+      }
+    } else if (saved && !g.affiliate_url) {
+      use = { ...g, affiliate_url: saved.url, asin: saved.asin || g.asin || null };
+    }
+    items.push(await shopItemFromGarment(sp, use));
     await updateShopPage(sp, { items });
     await rememberOnOutfit(sp, gid);
+    const label = itemLabel(use);
+    return { message: saved ? `Added ${label} with its saved Amazon link.` : `Added ${label}.` };
   }
   async function addLookLink(sp, rawUrl, name) {
     const t = tagAmazon(rawUrl, state.settings.amazon_tag);
@@ -2593,11 +2833,12 @@ const ReelEngine = (() => {
     await updateShopPage(sp, { items });
     if (it.garment_id) await forgetOnOutfit(sp, it.garment_id);
   }
-  function lookItemsSheet(id) {
+  function lookItemsSheet(id, opts = {}) {
     const sp = state.shops.find((x) => x.id === id); if (!sp) return;
     const items = sp.items || [];
     const onLook = new Set(items.map((it) => it.garment_id).filter(Boolean));
-    const choices = state.garments.filter((g) => g && (g.name || "").trim() && !onLook.has(g.id));
+    const choices = closetChoices(state.garments, onLook);
+    const ask = opts.ask ? garment(opts.ask) : null;
     const thumb = (it) => {
       if (it.image_path) return `<img src="${esc(pubUrl(it.image_path))}" alt="" style="width:44px;height:56px;object-fit:cover;border-radius:8px;background:var(--soft)">`;
       if (it.image_url) return `<img src="${esc(it.image_url)}" alt="" style="width:44px;height:56px;object-fit:contain;border-radius:8px;background:#fff">`;
@@ -2613,7 +2854,13 @@ const ReelEngine = (() => {
         </div>`).join("") || '<p class="kv">No products on this look page yet.</p>'}
       </div>
       <h3>Add from My Clothing</h3>
-      ${choices.length ? `<div class="strip" id="liPick">${choices.map((g) => `<button type="button" class="tile contain" data-add="${g.id}" aria-label="Add ${esc(g.name)}"><img ${imgAttr(g, "thumb")} alt=""><span class="cap">${esc(g.name)}</span></button>`).join("")}</div>` : '<p class="kv">Every clothing item is already on this look, or My Clothing is empty.</p>'}
+      <p class="kv" style="margin:0 0 8px">${choices.length} in your closet, every category. Swipe the row, or search to see them all.</p>
+      ${choices.length ? `<div class="strip" id="liPick">${choices.map((g) => `<button type="button" class="tile contain" data-add="${g.id}" aria-label="Add ${esc(itemLabel(g))}"><img ${imgAttr(g, "thumb")} alt=""><span class="cap">${esc(itemLabel(g))}</span>${savedShopLink(g) ? '<span class="badge">link</span>' : ""}</button>`).join("")}</div>` : '<p class="kv">Every clothing item is already on this look, or My Clothing is empty.</p>'}
+      <button class="btn secondary" type="button" id="liSearch">Search in closet</button>
+      ${ask ? `<div class="card" style="margin:0"><p class="hint" style="margin:0 0 8px">${esc(itemLabel(ask))} has no Amazon link saved. Paste one to put it on the look page.</p>
+        <div><label>Amazon link</label><input type="url" id="liItemUrl" placeholder="https://www.amazon.com/dp/…" inputmode="url" autocapitalize="none"></div>
+        <label class="inline" style="margin-top:8px"><input type="checkbox" id="liSaveBack" checked> Save this link on the clothing item</label>
+        <button class="btn" type="button" id="liItemAdd" style="margin-top:8px">Add ${esc(itemLabel(ask))}</button></div>` : ""}
       <h3>Add an Amazon link</h3>
       <div class="stack">
         <div><label>Amazon link</label><input type="url" id="liUrl" placeholder="https://www.amazon.com/dp/…" inputmode="url" autocapitalize="none"></div>
@@ -2631,12 +2878,23 @@ const ReelEngine = (() => {
       try { note("liMsg", "Removing…"); await removeLookItem(cur, +b.dataset.rm); back("Removed from the look page."); }
       catch (e) { note("liMsg", e.message, true); }
     });
-    $("liPick")?.querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => {
+    const pick = async (gid, btn) => {
       const cur = fresh(); if (!cur) return;
-      b.disabled = true; note("liMsg", "Adding…");
-      try { await addLookGarment(cur, b.dataset.add); back("Added to the look page."); }
-      catch (e) { b.disabled = false; note("liMsg", e.message, true); }
-    });
+      if (btn) btn.disabled = true; note("liMsg", "Adding…");
+      try {
+        const result = await addLookGarment(cur, gid);
+        if (result.needLink) { lookItemsSheet(id, { ask: gid }); return; }
+        back(result.message);
+      } catch (e) { if (btn) btn.disabled = false; note("liMsg", e.message, true); }
+    };
+    $("liPick")?.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => pick(b.dataset.add, b));
+    $("liSearch").onclick = () => closetSearchSheet(id);
+    if ($("liItemAdd")) $("liItemAdd").onclick = async () => {
+      const cur = fresh(); if (!cur || !ask) return;
+      $("liItemAdd").disabled = true; note("liMsg", "Adding…");
+      try { const result = await addLookGarment(cur, ask.id, { url: $("liItemUrl").value, saveBack: $("liSaveBack").checked }); back(result.message); }
+      catch (e) { $("liItemAdd").disabled = false; note("liMsg", e.message, true); }
+    };
     $("liUrl").oninput = () => { const t = tagAmazon($("liUrl").value, state.settings.amazon_tag); $("liNote").textContent = t.note || (state.settings.amazon_tag ? "Your tracking ID is added when the link doesn’t already have one." : "Set your Amazon tracking ID under Account to tag new links."); };
     $("liAdd").onclick = async () => {
       const cur = fresh(); if (!cur) return;
@@ -2645,6 +2903,41 @@ const ReelEngine = (() => {
       catch (e) { $("liAdd").disabled = false; note("liMsg", e.message, true); }
     };
     $("liBack").onclick = () => { shopHomeSheet(); const card = $("sheetBody").querySelector(`[data-sp="${id}"]`); if (card) card.scrollIntoView({ block: "nearest" }); };
+  }
+  function closetSearchSheet(spId) {
+    const sp = state.shops.find((x) => x.id === spId); if (!sp) return;
+    const onLook = new Set((sp.items || []).map((it) => it.garment_id).filter(Boolean));
+    const all = closetChoices(state.garments, onLook);
+    const cats = ["all", ...CATS.filter((c) => all.some((g) => (g.category || "other") === c)), ...[...new Set(all.map((g) => g.category || "other"))].filter((c) => !CATS.includes(c))];
+    const catLabel = (c) => c === "all" ? "All" : c === "one-pieces" ? "One-pieces" : c === "accessory" ? "Accessories" : c.charAt(0).toUpperCase() + c.slice(1);
+    const paint = (q, cat) => {
+      const list = all.filter((g) => closetMatches(g, q, cat));
+      const el = $("csList"); if (!el) return;
+      el.innerHTML = list.map((g) => `<button type="button" class="tile contain" data-add="${g.id}" aria-label="Add ${esc(itemLabel(g))}"><img ${imgAttr(g, "thumb")} alt=""><span class="cap">${esc(itemLabel(g))}</span>${savedShopLink(g) ? '<span class="badge">link</span>' : ""}</button>`).join("") || '<p class="kv" style="grid-column:1/-1">No closet items match.</p>';
+      fillImgs(el);
+      el.querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => {
+        b.disabled = true; note("csMsg", "Adding…");
+        try {
+          const cur = state.shops.find((x) => x.id === spId);
+          const result = await addLookGarment(cur, b.dataset.add);
+          if (result.needLink) { lookItemsSheet(spId, { ask: b.dataset.add }); return; }
+          lookItemsSheet(spId); note("liMsg", result.message);
+        } catch (e) { b.disabled = false; note("csMsg", e.message, true); }
+      });
+    };
+    openSheet(`<h3>Search in closet</h3>
+      <p class="hint">${all.length} item${all.length === 1 ? "" : "s"} not already on ${esc(sp.title)}. A saved Amazon link, name, photo and price are copied when you tap one.</p>
+      <input type="search" id="csSearch" placeholder="Search name, brand or category" enterkeyhint="search" aria-label="Search closet">
+      <div class="chips" id="csCats" style="margin-top:8px">${cats.map((c) => `<button type="button" class="chip ${c === "all" ? "on" : ""}" data-cat="${esc(c)}">${esc(catLabel(c))}</button>`).join("")}</div>
+      <div id="csList"></div>
+      <button class="btn secondary" type="button" id="csBack" style="margin-top:10px">Back</button>
+      <div id="csMsg" class="msg"></div>`);
+    let cat = "all";
+    const q = () => $("csSearch").value;
+    $("csSearch").oninput = () => paint(q(), cat);
+    $("csCats").querySelectorAll("[data-cat]").forEach((b) => b.onclick = () => { cat = b.dataset.cat; $("csCats").querySelectorAll(".chip").forEach((k) => k.classList.toggle("on", k === b)); paint(q(), cat); });
+    $("csBack").onclick = () => lookItemsSheet(spId);
+    paint("", "all");
   }
   // One shoppable page per outfit. An existing page keeps its collage and only refreshes products when the snapshot
   // is behind the saved items. A missing page is created with the current collage (the first time needs that image).
@@ -2749,6 +3042,7 @@ const ReelEngine = (() => {
       <p class="hint">${esc(sp.title)}. This picture is used on the storefront tile and the look page.</p>
       ${prev ? `<img class="big" id="cpPrev" alt="" src="${prev}" style="max-height:220px;width:100%;object-fit:contain;background:var(--soft)">` : ""}
       <div class="stack" style="margin-top:10px">
+        ${prev ? '<button class="btn secondary" type="button" id="cpAdjust">Adjust</button>' : ""}
         <button class="btn" type="button" id="cpUpload">Upload from camera roll</button>
         <input id="cpFile" type="file" accept="image/*" class="hidden">
         <div><label>My Photos</label>
@@ -2769,10 +3063,29 @@ const ReelEngine = (() => {
       try { await saveLookCover(sp, blob); done("Photo updated. The storefront tile and the look page use it now."); }
       catch (e) { saving = false; note("cpMsg", e.message, true); if ($("cpFile")) $("cpFile").value = ""; }
     };
+    const adjustThenSave = async (blob) => {
+      let snapped = false;
+      openAdjuster({
+        title: "Adjust cover",
+        blob,
+        onReset: async () => {
+          const names = await shopFileNames(sp).catch(() => []);
+          if (!names.some((f) => f.name === "custom-original.jpg")) return null;
+          const res = await fetch(pubUrl(`${state.uid}/${sp.slug}/custom-original.jpg`) + "?v=" + Date.now());
+          if (!res.ok) return null;
+          return await res.blob();
+        },
+        onSave: async (out) => {
+          if (!snapped) { snapped = true; try { const names = await shopFileNames(sp); if (!names.some((f) => f.name === "custom-original.jpg")) await uploadPublic(`${state.uid}/${sp.slug}/custom-original.jpg`, await jpegCover(blob)); } catch (e) { console.warn("cover original", e); } }
+          await useBlob(out);
+        },
+      });
+    };
+    if ($("cpAdjust")) $("cpAdjust").onclick = async () => { try { note("cpMsg", "Opening…"); const res = await fetch(pubUrl(shopTilePath(sp)) + "?v=" + encodeURIComponent(sp.updated_at || "")); if (!res.ok) throw new Error("The cover photo could not be opened."); await adjustThenSave(await res.blob()); } catch (e) { note("cpMsg", e.message, true); } };
     $("cpUpload").onclick = () => $("cpFile").click();
-    $("cpFile").onchange = () => { const f = $("cpFile").files && $("cpFile").files[0]; if (f) useBlob(f); };
-    $("sheetBody").querySelectorAll("[data-gen]").forEach((b) => b.onclick = async () => { const g = state.generations.find((x) => x.id === b.dataset.gen); if (g?.path) try { await useBlob(await blobOf(g.path)); } catch (e) { note("cpMsg", e.message, true); } });
-    $("sheetBody").querySelectorAll("[data-col]").forEach((b) => b.onclick = async () => { const c = state.collages.find((x) => x.id === b.dataset.col); if (c) try { await useBlob(await collageCoverBlob(c)); } catch (e) { note("cpMsg", e.message, true); } });
+    $("cpFile").onchange = () => { const f = $("cpFile").files && $("cpFile").files[0]; if (f) adjustThenSave(f); };
+    $("sheetBody").querySelectorAll("[data-gen]").forEach((b) => b.onclick = async () => { const g = state.generations.find((x) => x.id === b.dataset.gen); if (g?.path) try { await adjustThenSave(await blobOf(g.path)); } catch (e) { note("cpMsg", e.message, true); } });
+    $("sheetBody").querySelectorAll("[data-col]").forEach((b) => b.onclick = async () => { const c = state.collages.find((x) => x.id === b.dataset.col); if (c) try { await adjustThenSave(await collageCoverBlob(c)); } catch (e) { note("cpMsg", e.message, true); } });
     $("cpRevert").onclick = async () => {
       if (lookUsesAutoCollage(sp)) { note("cpMsg", "This look already uses the auto collage."); return; }
       if (!confirm("Use the auto collage on the storefront tile and the look page?")) return;
@@ -3538,7 +3851,7 @@ const ReelEngine = (() => {
     $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   });
   if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems };
+    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches };
   }
 })();
 </script>

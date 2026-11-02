@@ -12,6 +12,25 @@ const coverCtx = {};
 vm.runInNewContext(coverSrc + "\nthis.shopTilePath = shopTilePath;", coverCtx);
 const shopTilePath = coverCtx.shopTilePath;
 
+test("link.amazon and other Amazon short domains count as shoppable links", () => {
+  const ctx = { URL };
+  vm.runInNewContext(coverSrc + "\nthis.isAmazonLink = isAmazonLink;", ctx);
+  const ok = ctx.isAmazonLink;
+  assert.equal(ok("https://link.amazon/B0d5OQIHy"), true);
+  assert.equal(ok("https://link.amazon/B0ik3bCoR"), true);
+  assert.equal(ok("https://amzn.to/3abc"), true);
+  assert.equal(ok("https://amzn.eu/d/abc"), true);
+  assert.equal(ok("https://amzlink.to/abc"), true);
+  assert.equal(ok("https://www.amazon.com/dp/B00BAG1234?tag=heather-20"), true);
+  assert.equal(ok("https://example.com/dp/B00BAG1234"), false);
+  assert.equal(ok("http://link.amazon/B0d5OQIHy"), false);
+  const shop = readFileSync(new URL("../shop.html", import.meta.url), "utf8");
+  const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(shop, /const ok = \(u\) => isAmazonLink\(u\)/);
+  assert.match(index, /const amazonLink = \(u\) => isAmazonLink\(u\)/);
+  assert.match(index, /isAmazonHost\(host\)/);
+});
+
 test("tile image matches the public storefront, including custom.jpg with an empty or collage cover", () => {
   // Cozy Espresso and Olive & On the Go, after Cover: collage rewrote cover_public_path
   // to the auto grid while leaving the styled photo in collage_public_path.
@@ -133,7 +152,11 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
       const s = window.__studio.state;
       s.uid = "user-1";
       s.me = { presets: {}, used_today: 0, daily_cap: 20, email: "heather@example.com", tz: "America/Chicago", actions: {} };
-      s.garments = [{ id: "g-bag", name: "Black tote", brand: "", affiliate_url: "https://www.amazon.com/dp/B00BAG1234?tag=heather-20", asin: "B00BAG1234", path: "studio/bag.jpg", cutout_path: "studio/bag.jpg" }];
+      s.garments = [
+        { id: "g-bag", name: "Black tote", brand: "", affiliate_url: "https://www.amazon.com/dp/B00BAG1234?tag=heather-20", asin: "B00BAG1234", path: "studio/bag.jpg", cutout_path: "studio/bag.jpg", category: "bag" },
+        { id: "g-ear", name: "", brand: "Mejuri", category: "accessory", notes: "gold earrings", affiliate_url: "https://www.amazon.com/dp/B00EAR1234?tag=heather-20", path: "studio/ear.jpg" },
+        { id: "g-belt", name: "Plain belt", brand: "", category: "accessory", affiliate_url: "", product_url: "", path: "studio/belt.jpg" },
+      ];
       s.outfits = [{ id: "o-cozy", name: "Cozy Espresso", items: [], hero_generation_id: null }];
       s.generations = [{ id: "gen-1", path: "studio/gen-1.jpg", outfit_id: "o-cozy", created_at: "2026-10-01T00:00:00Z" }];
       s.collages = [
@@ -173,14 +196,19 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
       Object.defineProperty(sb, "storage", { configurable: true, get: () => ({ from: () => storageApi() }) });
       sb.from = (table) => {
         const q = {
-          select() { return q; }, order() { return q; },
+          select() { return q; }, order() { return q; }, range() { return q; },
           update(patch) { q._patch = patch; return q; },
           insert() { return q; },
           eq(col, val) {
             if (col === "id" && q._patch && table === "shop_pages") {
               const row = window.__studio.state.shops.find((s) => s.id === val);
               if (row) Object.assign(row, q._patch);
-              window.__studio.shopCalls.push({ op: "update", id: val, patch: { ...q._patch } });
+              window.__studio.shopCalls.push({ op: "update", table, id: val, patch: { ...q._patch } });
+            }
+            if (col === "id" && q._patch && table === "garments") {
+              const row = window.__studio.state.garments.find((g) => g.id === val);
+              if (row) Object.assign(row, q._patch);
+              window.__studio.shopCalls.push({ op: "update", table, id: val, patch: { ...q._patch } });
             }
             return q;
           },
@@ -257,6 +285,10 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
     });
     page.on("pageerror", (err) => console.error("PAGEERROR", err.message));
     await page.click("#cpPhotos .tile");
+    await page.waitForFunction(() => !document.getElementById("adjuster").classList.contains("hidden") && document.querySelector("#adjAspect [data-a='4:5']").classList.contains("on"));
+    await page.click("#adjRot");
+    await page.screenshot({ path: "/opt/cursor/artifacts/adjust-photo-phone.png" });
+    await page.click("#adjSave");
     try {
       await page.waitForFunction(() => (document.getElementById("shhMsg")?.textContent || "").includes("Photo updated"), { timeout: 8000 });
     } catch (e) {
@@ -268,7 +300,8 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
       throw new Error(e.message + " " + JSON.stringify(info));
     }
     const saved = await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "upload" || c.op === "update"));
-    const upload = saved.find((c) => c.op === "upload");
+    const upload = saved.find((c) => c.op === "upload" && c.path.endsWith("/custom.jpg"));
+    assert.ok(upload);
     assert.equal(upload.path, "user-1/hyzzf1gkg9/custom.jpg");
     assert.equal(upload.type, "image/jpeg");
     assert.equal(upload.upsert, true);
@@ -285,6 +318,8 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
     await page.waitForSelector("#cpFile");
     const chooser = await page.$("#cpFile");
     await chooser.uploadFile("/tmp/new-cover.jpg");
+    await page.waitForFunction(() => !document.getElementById("adjuster").classList.contains("hidden"));
+    await page.click("#adjSave");
     await page.waitForFunction(() => (document.getElementById("shhMsg")?.textContent || "").includes("Photo updated"));
     const fileUpload = (await page.evaluate(() => window.__studio.shopCalls)).filter((c) => c.op === "upload").at(-1);
     assert.equal(fileUpload.path, "user-1/jsoubro5fr/custom.jpg");
@@ -322,8 +357,23 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
     assert.match(await page.$eval("#liList", (el) => el.textContent), /Olive leggings/);
     const addH = await page.$eval("#liAdd", (el) => el.getBoundingClientRect().height);
     assert.ok(addH >= 44);
+    const choiceIds = await page.evaluate(() => window.__studio.closetChoices(window.__studio.state.garments, []).map((g) => g.id));
+    assert.deepEqual(choiceIds.filter((id) => id === "g-ear" || id === "g-belt").sort(), ["g-belt", "g-ear"]);
+    await page.click("#liSearch");
+    await page.waitForSelector("#csSearch");
+    await page.type("#csSearch", "earring");
+    await page.click("#csCats [data-cat='accessory']");
+    await page.waitForFunction(() => document.querySelector("#csList [data-add='g-ear']"));
+    assert.equal(await page.$eval("#csList", (el) => el.textContent.includes("Plain belt")), false);
+    await page.click("#csList [data-add='g-ear']");
+    await page.waitForFunction(() => (document.getElementById("liMsg")?.textContent || "").includes("saved Amazon link"));
+    const earItem = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "update" && c.table === "shop_pages"))).at(-1).patch.items.find((it) => it.garment_id === "g-ear");
+    assert.equal(earItem.url, "https://www.amazon.com/dp/B00EAR1234?tag=heather-20");
+    assert.equal(earItem.name.length > 0, true);
+    await page.screenshot({ path: "/opt/cursor/artifacts/search-closet-phone.png" });
+
     await page.click('#liPick [data-add="g-bag"]');
-    await page.waitForFunction(() => (document.getElementById("liMsg")?.textContent || "").includes("Added to the look page"));
+    await page.waitForFunction(() => (document.getElementById("liMsg")?.textContent || "").includes("saved Amazon link"));
     assert.match(await page.$eval("#liList", (el) => el.textContent), /Black tote/);
     const addedItems = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "update"))).at(-1).patch.items;
     assert.equal(addedItems.some((it) => it.garment_id === "g-bag" && it.url.includes("tag=heather-20")), true);
@@ -335,15 +385,28 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
 
     await page.$eval("#liUrl", (el) => { el.value = "https://www.amazon.com/dp/B0TEST1234"; el.dispatchEvent(new Event("input", { bubbles: true })); });
     await page.type("#liName", "Gold hoops");
-    await page.click("#liAdd");
+    await page.click('#liPick [data-add="g-belt"]');
+    await page.waitForSelector("#liItemUrl");
+    assert.equal(await page.$eval("#liSaveBack", (el) => el.checked), true);
+    await page.$eval("#liItemUrl", (el) => { el.value = "https://www.amazon.com/dp/B00BELT123"; });
+    await page.click("#liItemAdd");
     await page.waitForFunction(() => /Added/.test(document.getElementById("liMsg")?.textContent || ""));
+    const beltSaved = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.table === "garments"))).at(-1);
+    assert.equal(beltSaved.patch.affiliate_url, "https://www.amazon.com/dp/B00BELT123?tag=heather-20");
+
+    await page.$eval("#liUrl", (el) => { el.value = "https://link.amazon/B0d5OQIHy"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    await page.$eval("#liName", (el) => { el.value = "Gold hoops"; });
+    await page.click("#liAdd");
+    await page.waitForFunction(() => /Short link kept/.test(document.getElementById("liMsg")?.textContent || ""));
     const linked = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "update"))).at(-1).patch.items;
     const hoops = linked.find((it) => it.manual);
     assert.equal(hoops.name, "Gold hoops");
-    assert.equal(hoops.url, "https://www.amazon.com/dp/B0TEST1234?tag=heather-20");
+    assert.equal(hoops.url, "https://link.amazon/B0d5OQIHy");
     await page.screenshot({ path: "/opt/cursor/artifacts/edit-items-phone.png" });
 
     await page.goto(`http://127.0.0.1:${port}/shop.html`, { waitUntil: "domcontentloaded" });
+    const linkOk = await page.evaluate(() => isAmazonLink("https://link.amazon/B0d5OQIHy") && !isAmazonLink("https://example.com/x"));
+    assert.equal(linkOk, true);
     const fromShop = await page.evaluate(() => shopTilePath({
       cover_source: "collage",
       cover_public_path: "u/hyzzf1gkg9/collage.jpg",

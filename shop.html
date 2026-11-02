@@ -79,7 +79,7 @@
     bar.innerHTML = `<a href="${esc(studio)}" class="btn" style="display:inline-flex;align-items:center;gap:6px;background:var(--card);color:var(--ink);border:1px solid var(--line);padding:10px 16px;font-size:15px"><span aria-hidden="true" style="font-size:20px;line-height:1">‹</span> Back to Studio</a>`;
     page.parentNode.insertBefore(bar, page);
   }
-  const ok = (u) => /^https:\/\/([a-z0-9-]+\.)*(amazon\.[a-z.]+|amzn\.(to|com|eu|asia|in)|a\.co)\//i.test(u || "");
+  const ok = (u) => isAmazonLink(u);
   const home = location.pathname.split("/").pop() || "shop.html";
   // ---------------------------------------------------------------- homepage (no outfit in the address): grid of published outfits
   if (!slug) {
