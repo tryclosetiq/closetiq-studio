@@ -2724,7 +2724,7 @@ const ReelEngine = (() => {
     }
     return out;
   }
-  const amazonLink = (u) => isAmazonLink(u);
+  const amazonLink = (u) => isShopLink(u);
   // Every closet row can be added. A blank name still shows (brand or category), and no category is dropped.
   function closetChoices(garments, usedIds) {
     const used = usedIds instanceof Set ? usedIds : new Set(usedIds || []);
@@ -2809,7 +2809,7 @@ const ReelEngine = (() => {
   }
   async function addLookLink(sp, rawUrl, name) {
     const t = tagAmazon(rawUrl, state.settings.amazon_tag);
-    if (!t.url || !amazonLink(t.url) || /Not an Amazon|valid URL/.test(t.note || "")) throw new Error("Paste an Amazon product link.");
+    if (!t.url || !amazonLink(t.url) || /valid URL/.test(t.note || "")) throw new Error("Paste an Amazon link or an allowed affiliate link.");
     const items = [...(sp.items || [])];
     if (items.some((it) => it.url === t.url || (t.asin && String(it.url || "").toUpperCase().includes(t.asin)))) throw new Error("That link is already on this look.");
     const match = t.asin && state.garments.find((g) => (g.asin || "").toUpperCase() === t.asin || String(g.affiliate_url || g.product_url || "").toUpperCase().includes(t.asin));
@@ -3134,13 +3134,28 @@ const ReelEngine = (() => {
     const site = state.site || {}, store = site.storefront_url || state.settings.amazon_storefront_url || "";
     const prods = [...(state.products || [])].filter((p) => p.published).sort((a, b) => (b.featured - a.featured) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)));
     const tabs = `<div class="chips" style="margin-bottom:10px">${[["looks", "Complete Looks"], ["finds", "Individual Finds"], ["about", "About & links"]].map(([k, l]) => `<button class="chip ${tab === k ? "on" : ""}" data-tab="${k}">${l}</button>`).join("")}</div>`;
-    const findsHtml = `<p class="hint">Items you've switched on in My Clothing (open an item → "Show in Individual Finds"). Favorites also appear under My Favorites.</p>
+    const findsHtml = `<p class="hint">Amazon pieces come from My Clothing. Other retailers can be added here with an allowed affiliate link. Favorites also appear under My Favorites.</p>
+      <div class="card" id="fnCard" style="margin:0 0 12px"><strong>Add a find</strong>
+        <div class="stack" style="margin-top:8px">
+          <input type="text" id="fnName" placeholder="Product name" aria-label="Product name">
+          <input type="text" id="fnBrand" placeholder="Brand" aria-label="Brand">
+          <select id="fnCat" aria-label="Category">${PRODUCT_CATS.map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>
+          <input type="url" id="fnUrl" placeholder="https://… affiliate link" aria-label="Affiliate link" inputmode="url" autocapitalize="none">
+          <input type="text" id="fnPrice" placeholder="Price, e.g. $48.99" aria-label="Price">
+          <input type="text" id="fnPromo" placeholder="Promo note" aria-label="Promo note">
+          <button class="btn secondary" type="button" id="fnPhoto">Choose photo</button>
+          <input id="fnFile" type="file" accept="image/*" class="hidden">
+          <p class="kv" id="fnFileName" style="margin:0">No photo yet.</p>
+          <button class="btn" type="button" id="fnAdd">Add find</button>
+        </div></div>
       <div class="stack" id="shhProds">${prods.map((p) => `<div class="card" data-pr="${p.id}" style="margin:0"><div class="row" style="align-items:flex-start">
           <div style="flex:0 0 64px"><div class="tile contain" style="width:64px"><img src="${p.image_public_path ? esc(pubUrl(p.image_public_path)) + "?v=" + encodeURIComponent(p.updated_at) : ""}" alt=""></div></div>
           <div style="flex:1;min-width:0;display:grid;gap:6px"><strong style="font-size:14px">${esc(p.name)}</strong>
             <select data-f="category" aria-label="Storefront category">${PRODUCT_CATS.map(([k, l]) => `<option value="${k}" ${p.category === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <input type="text" data-f="price" value="${esc(p.price || "")}" placeholder="Price" aria-label="Price">
+            <input type="text" data-f="promo_note" value="${esc(p.promo_note || "")}" placeholder="Promo note" aria-label="Promo note">
             <label class="inline"><input type="checkbox" data-f="featured" ${p.featured ? "checked" : ""}> My Favorites</label>
-            <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" data-act="save">Save</button><button class="btn danger small" data-act="hide">Remove from storefront</button></div></div></div></div>`).join("") || '<div class="empty">No finds on the storefront yet. Open an item in My Clothing and tap "Show in Individual Finds".</div>'}</div>`;
+            <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" data-act="save">Save</button><button class="btn danger small" data-act="hide">Remove from storefront</button></div></div></div></div>`).join("") || '<div class="empty">No finds on the storefront yet.</div>'}</div>`;
     const aboutHtml = `<div class="stack">
       <div><label>Storefront title</label><input type="text" id="stTitle" value="${esc(site.title || "Shop My Style")}"></div>
       <div><label>Subtitle</label><input type="text" id="stSub" value="${esc(site.subtitle ?? "Outfits, favorite finds & everyday inspiration.")}"></div>
@@ -3188,9 +3203,37 @@ const ReelEngine = (() => {
     if (tab === "finds") {
       $("shhProds").querySelectorAll("[data-pr]").forEach((card) => {
         const p = state.products.find((x) => x.id === card.dataset.pr); const g = garment(p.garment_id);
-        card.querySelector('[data-act="save"]').onclick = async () => { try { const { error } = await sb.from("shop_products").update({ category: card.querySelector('[data-f="category"]').value, featured: card.querySelector('[data-f="featured"]').checked, updated_at: new Date().toISOString() }).eq("id", p.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); shopHomeSheet("finds"); note("shhMsg", "Saved."); } catch (e) { note("shhMsg", e.message, true); } };
-        card.querySelector('[data-act="hide"]').onclick = async () => { if (!confirm(`Remove "${p.name}" from the storefront? The clothing item and its link stay in My Clothing.`)) return; try { if (g) await unpublishProduct(g); else { await sb.from("shop_products").update({ published: false }).eq("id", p.id).eq("user_id", state.uid); await loadAll(); } shopHomeSheet("finds"); note("shhMsg", "Removed from the storefront."); } catch (e) { note("shhMsg", e.message, true); } };
+        card.querySelector('[data-act="save"]').onclick = async () => {
+          const patch = { category: card.querySelector('[data-f="category"]').value, featured: card.querySelector('[data-f="featured"]').checked, price: card.querySelector('[data-f="price"]').value.trim() || null, promo_note: card.querySelector('[data-f="promo_note"]').value.trim() || null, updated_at: new Date().toISOString() };
+          try {
+            let { error } = await sb.from("shop_products").update(patch).eq("id", p.id).eq("user_id", state.uid);
+            if (error && /price|promo_note/.test(error.message)) { const { price, promo_note, ...rest } = patch; ({ error } = await sb.from("shop_products").update(rest).eq("id", p.id).eq("user_id", state.uid)); if (!error) { await loadAll(); shopHomeSheet("finds"); note("shhMsg", "Saved category and favorite. Price and promo need the shop_products columns first.", true); return; } }
+            if (error) throw new Error(error.message);
+            await loadAll(); shopHomeSheet("finds"); note("shhMsg", "Saved.");
+          } catch (e) { note("shhMsg", e.message, true); }
+        };
+        card.querySelector('[data-act="hide"]').onclick = async () => { if (!confirm(g ? `Remove "${p.name}" from the storefront? The clothing item and its link stay in My Clothing.` : `Remove "${p.name}" from the storefront?`)) return; try { if (g) await unpublishProduct(g); else { await sb.from("shop_products").update({ published: false }).eq("id", p.id).eq("user_id", state.uid); await loadAll(); } shopHomeSheet("finds"); note("shhMsg", "Removed from the storefront."); } catch (e) { note("shhMsg", e.message, true); } };
       });
+      let fnFile = null;
+      $("fnPhoto").onclick = () => $("fnFile").click();
+      $("fnFile").onchange = () => { fnFile = ($("fnFile").files && $("fnFile").files[0]) || null; $("fnFileName").textContent = fnFile ? fnFile.name : "No photo yet."; };
+      $("fnAdd").onclick = async () => {
+        const name = $("fnName").value.trim(), brand = $("fnBrand").value.trim(), url = $("fnUrl").value.trim();
+        if (!name) { note("shhMsg", "Add a product name.", true); return; }
+        if (!isShopLink(url) || isAmazonLink(url)) { note("shhMsg", "Paste an allowed non-Amazon affiliate link (Amazon pieces are added from My Clothing).", true); return; }
+        if (!fnFile) { note("shhMsg", "Choose a photo for the find.", true); return; }
+        $("fnAdd").disabled = true; note("shhMsg", "Adding…");
+        try {
+          const id = crypto.randomUUID();
+          const image_public_path = `${state.uid}/products/${id}.jpg`;
+          await uploadPublic(image_public_path, await jpegCover(fnFile));
+          const row = { id, user_id: state.uid, garment_id: null, name: shortName(name) || name, full_name: name, brand: brand || null, category: $("fnCat").value, url, image_public_path, published: true, featured: false, sort_order: 0, price: $("fnPrice").value.trim() || null, promo_note: $("fnPromo").value.trim() || null, updated_at: new Date().toISOString() };
+          let { error } = await sb.from("shop_products").insert(row);
+          if (error && /price|promo_note/.test(error.message)) { delete row.price; delete row.promo_note; ({ error } = await sb.from("shop_products").insert(row)); }
+          if (error) throw new Error(error.message);
+          await loadAll(); shopHomeSheet("finds"); note("shhMsg", "Find added.");
+        } catch (e) { note("shhMsg", e.message, true); $("fnAdd").disabled = false; }
+      };
       return;
     }
     $("shhList").querySelectorAll("[data-sp]").forEach((card) => {

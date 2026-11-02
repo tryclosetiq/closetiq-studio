@@ -14,7 +14,7 @@ const shopTilePath = coverCtx.shopTilePath;
 
 test("link.amazon and other Amazon short domains count as shoppable links", () => {
   const ctx = { URL };
-  vm.runInNewContext(coverSrc + "\nthis.isAmazonLink = isAmazonLink;", ctx);
+  vm.runInNewContext(coverSrc + "\nObject.assign(this, { isAmazonLink, isShopLink, shopButtonLabel, affiliateDisclosure });", ctx);
   const ok = ctx.isAmazonLink;
   assert.equal(ok("https://link.amazon/B0d5OQIHy"), true);
   assert.equal(ok("https://link.amazon/B0ik3bCoR"), true);
@@ -24,10 +24,22 @@ test("link.amazon and other Amazon short domains count as shoppable links", () =
   assert.equal(ok("https://www.amazon.com/dp/B00BAG1234?tag=heather-20"), true);
   assert.equal(ok("https://example.com/dp/B00BAG1234"), false);
   assert.equal(ok("http://link.amazon/B0d5OQIHy"), false);
+  const shopOk = ctx.isShopLink;
+  const cj = "https://www.tkqlhce.com/click-101828062-15466305?url=https%3A%2F%2Fwww.dreampairs.com%2Fproducts%2Fwomens-platform-ankle-snow-boots-sdsb2427w%3Fcolor%3D1919";
+  assert.equal(shopOk(cj), true);
+  assert.equal(shopOk("https://www.dreampairs.com/products/boot"), true);
+  assert.equal(shopOk("https://example.com/products/boot"), false);
+  assert.equal(shopOk("https://tkqlhce.com.evil.com/click"), false);
+  assert.equal(shopOk("https://evil.sjv.io/c/1"), true);
+  assert.equal(ctx.shopButtonLabel(cj, "Dream Pairs"), "Shop at Dream Pairs");
+  assert.equal(ctx.shopButtonLabel("https://www.amazon.com/dp/B00BAG1234", "Dream Pairs"), "Shop on Amazon");
+  assert.equal(ctx.shopButtonLabel(cj, ""), "Shop now");
+  assert.equal(ctx.affiliateDisclosure("As an Amazon Associate I earn from qualifying purchases.", true), "As an Amazon Associate I earn from qualifying purchases. I may earn a commission from other affiliate links.");
+  assert.equal(ctx.affiliateDisclosure("As an Amazon Associate I earn from qualifying purchases.", false), "As an Amazon Associate I earn from qualifying purchases.");
   const shop = readFileSync(new URL("../shop.html", import.meta.url), "utf8");
   const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(shop, /const ok = \(u\) => isAmazonLink\(u\)/);
-  assert.match(index, /const amazonLink = \(u\) => isAmazonLink\(u\)/);
+  assert.match(shop, /const ok = \(u\) => isShopLink\(u\)/);
+  assert.match(index, /const amazonLink = \(u\) => isShopLink\(u\)/);
   assert.match(index, /isAmazonHost\(host\)/);
 });
 

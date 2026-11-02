@@ -17,8 +17,38 @@ function isAmazonHost(host) {
 function isAmazonLink(u) {
   try {
     const url = new URL(String(u || "").trim());
-    return url.protocol === "https:" && isAmazonHost(url.hostname) !== "";
+    return url.protocol === "https:" && !url.username && !url.password && isAmazonHost(url.hostname) !== "";
   } catch { return false; }
+}
+// Retailer and affiliate hosts that may appear on a find or a look, besides Amazon.
+// Matching is the host itself or a subdomain, so tkqlhce.com.evil.com does not pass.
+const AFFILIATE_HOSTS = [
+  "tkqlhce.com", "anrdoezrs.net", "dpbolvw.net", "jdoqocy.com", "kqzyfj.com", "emjcd.com",
+  "dreampairs.com", "shareasale.com", "rstyle.me", "shopstyle.it", "go.skimresources.com",
+  "linksynergy.com", "awin1.com", "liketk.it", "shopltk.com", "ltk.com", "howl.me", "sjv.io", "pxf.io",
+];
+function isAffiliateHost(host) {
+  host = String(host || "").toLowerCase().replace(/\.$/, "");
+  return AFFILIATE_HOSTS.some((root) => host === root || host.endsWith("." + root));
+}
+function isShopLink(u) {
+  if (isAmazonLink(u)) return true;
+  try {
+    const url = new URL(String(u || "").trim());
+    if (url.protocol !== "https:" || url.username || url.password) return false;
+    return isAffiliateHost(url.hostname);
+  } catch { return false; }
+}
+function shopButtonLabel(url, brand) {
+  if (isAmazonLink(url)) return "Shop on Amazon";
+  const name = String(brand || "").trim();
+  return name ? "Shop at " + name : "Shop now";
+}
+function affiliateDisclosure(text, hasOther) {
+  const base = String(text || "").trim();
+  const extra = "I may earn a commission from other affiliate links.";
+  if (!hasOther || base.includes(extra)) return base;
+  return base ? base + " " + extra : extra;
 }
 function shopTilePath(row) {
   const hero = (row && row.collage_public_path) || "";
