@@ -334,6 +334,7 @@
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="shop-cover.js"></script>
 <script>
 // Decorative collage backgrounds — original procedural SVG, no external assets.
 // Each design renders at any W×H with normalized placement, so the on-screen stage, the saved
@@ -2435,7 +2436,7 @@ const ReelEngine = (() => {
     if (heroPick.custom) {
       if (heroPick.upload) { const blob = await shrink(opts.heroBlob, 1080, "image/jpeg", 0.9); if (!blob) throw new Error("That image could not be read. Try a JPG or PNG."); await uploadPublic(customPath, blob); }
       collage_public_path = customPath;
-    } else if (heroPick.dropCustom && prev.collage_public_path) await sb.storage.from("shop").remove([prev.collage_public_path]);
+    } else if (heroPick.dropCustom && prev.collage_public_path && !opts.keepCustomFile) await sb.storage.from("shop").remove([prev.collage_public_path]);
     const spots = heroPick.custom ? {} : await layoutHotspots(layout);   // tap areas only match the auto collage
     // Public list: a saved name. Blank names are left off (they stay in the Studio). A cutout, or an original the owner
     // marked public_ok, is copied into the shop bucket. Otherwise a named item with an Amazon link is listed with no
@@ -2526,6 +2527,125 @@ const ReelEngine = (() => {
   const SHOP_CATEGORIES = ["Everyday Casual", "Workwear", "Date Night", "Going Out", "Vacation", "Athleisure"];
   const pubUrl = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
   async function updateShopPage(sp, patch) { const { error } = await sb.from("shop_pages").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); }
+  // A phone photo or a Studio picture, shrunk the same way Share / Publish stores a custom shop image.
+  async function jpegCover(blob) {
+    let typed = blob;
+    try { typed = await imageTypedBlob(blob); } catch { typed = blob; }
+    try { const jpeg = await shrink(typed, 1080, "image/jpeg", 0.9); if (!jpeg) throw new Error("unreadable"); return jpeg; }
+    catch { throw new Error("That image could not be read. Try a JPG or PNG."); }
+  }
+  // Point the look page (collage_public_path) and the homepage tile (cover_public_path) at the same file,
+  // so both show the picture she just chose. custom.jpg is the existing flag for an owner image.
+  async function saveLookCover(sp, blob) {
+    const path = `${state.uid}/${sp.slug}/custom.jpg`;
+    await uploadPublic(path, await jpegCover(blob));
+    try { await updateShopPage(sp, { collage_public_path: path, cover_public_path: path }); }
+    catch (e) { if (!/cover_public_path/.test(e.message)) throw e; await updateShopPage(sp, { collage_public_path: path }); }
+  }
+  async function collageCoverBlob(c) {
+    if (c.layout && (c.layout.layers || c.layout.imported)) {
+      try { return await jpegCover(await renderLayout(c.layout, 1080)); }
+      catch (e) { if (!c.preview_path && !c.layout.image) throw e; }
+    }
+    const path = c.preview_path || c.layout?.image;
+    if (!path) throw new Error("That collage has no image yet.");
+    return jpegCover(await blobOf(path));
+  }
+  // True when the tile and the look page already show this look's auto collage (not a custom photo, not an AI cover).
+  function lookUsesAutoCollage(sp) {
+    const hero = sp.collage_public_path || "";
+    if (!hero || isCustomHeroPath(hero) || /\/cover\.jpg$/i.test(shopTilePath(sp))) return false;
+    const cover = sp.cover_public_path || "";
+    return shopTilePath(sp) === hero && (!cover || cover === hero);
+  }
+  // Which cover the public tile is actually showing. Drives the chip highlight, not the stored cover_source
+  // (that can still say "collage" while the tile prefers custom.jpg).
+  function coverChoice(p) {
+    const tile = shopTilePath(p);
+    if (isCustomHeroPath(tile)) return "custom";
+    if (/\/cover\.jpg$/i.test(tile)) return "photo";
+    return tile ? "collage" : "";
+  }
+  function lookOutfit(sp) {
+    const c = state.collages.find((x) => x.id === sp.collage_id);
+    return sp.outfit_id ? state.outfits.find((x) => x.id === sp.outfit_id) : (c?.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null);
+  }
+  function lookHero(sp) { const o = lookOutfit(sp); return o ? state.generations.find((g) => g.id === o.hero_generation_id) : null; }
+  async function shopFileNames(sp) {
+    const { data, error } = await sb.storage.from("shop").list(`${state.uid}/${sp.slug}`);
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+  // custom.jpg stays in the bucket when she switches away, so this can turn it back on.
+  async function useCustomCover(sp) {
+    if (!(await shopFileNames(sp)).some((f) => f.name === "custom.jpg")) { changePhotoSheet(sp.id); note("cpMsg", "Choose a photo to use as the custom cover.", true); return false; }
+    const path = `${state.uid}/${sp.slug}/custom.jpg`;
+    try { await updateShopPage(sp, { collage_public_path: path, cover_public_path: path }); }
+    catch (e) { if (!/cover_public_path/.test(e.message)) throw e; await updateShopPage(sp, { collage_public_path: path }); }
+    return true;
+  }
+  async function useAiCover(sp) {
+    const hero = lookHero(sp);
+    if (!hero?.path) throw new Error("Set an outfit cover photo under My Photos first.");
+    const path = `${state.uid}/${sp.slug}/cover.jpg`;
+    await uploadPublic(path, await jpegCover(await blobOf(hero.path)));
+    try { await updateShopPage(sp, { collage_public_path: path, cover_public_path: path, cover_source: "photo" }); }
+    catch (e) { if (!/cover_/.test(e.message)) throw e; await updateShopPage(sp, { collage_public_path: path }); }
+  }
+  // Put the rendered product collage back on the tile and the look page. custom.jpg is kept so Custom photo can be chosen again.
+  async function revertLookCover(sp) {
+    const c = state.collages.find((x) => x.id === sp.collage_id);
+    if (c?.layout && (c.layout.layers || c.layout.imported)) { await publishShopFor(c, c.layout, { hero: "collage", cover_source: "collage", keepCustomFile: true }); return; }
+    const file = (await shopFileNames(sp)).find((f) => /^collage\./i.test(f.name));
+    if (!file) throw new Error("The auto collage isn't available for this look. Open the collage and use Share / Publish, then try again.");
+    const auto = `${state.uid}/${sp.slug}/${file.name}`;
+    try { await updateShopPage(sp, { collage_public_path: auto, cover_public_path: auto, cover_source: "collage" }); }
+    catch (e) { if (!/cover_/.test(e.message)) throw e; await updateShopPage(sp, { collage_public_path: auto }); }
+  }
+  function changePhotoSheet(id) {
+    const sp = state.shops.find((x) => x.id === id); if (!sp) return;
+    const tile = shopTilePath(sp);
+    const prev = tile ? esc(pubUrl(tile)) + "?v=" + encodeURIComponent(sp.updated_at || "") : "";
+    const photos = state.generations.filter((g) => g.path);
+    const collages = state.collages.filter((c) => c.preview_path || c.layout?.image || c.layout?.layers || c.layout?.imported);
+    const photoLabel = (g) => garment(g.garment_id)?.name || state.outfits.find((o) => o.id === g.outfit_id)?.name || "Photo";
+    openSheet(`<h3>Change photo</h3>
+      <p class="hint">${esc(sp.title)}. This picture is used on the storefront tile and the look page.</p>
+      ${prev ? `<img class="big" id="cpPrev" alt="" src="${prev}" style="max-height:220px;width:100%;object-fit:contain;background:var(--soft)">` : ""}
+      <div class="stack" style="margin-top:10px">
+        <button class="btn" type="button" id="cpUpload">Upload from camera roll</button>
+        <input id="cpFile" type="file" accept="image/*" class="hidden">
+        <div><label>My Photos</label>
+          ${photos.length ? `<div class="strip" id="cpPhotos">${photos.map((g) => `<button type="button" class="tile" data-gen="${g.id}" aria-label="Use ${esc(photoLabel(g))}"><img data-path="${esc(g.path)}" alt=""><span class="cap">${esc(photoLabel(g))}</span></button>`).join("")}</div>` : '<p class="kv">No photos in My Photos yet.</p>'}
+        </div>
+        <div><label>Collages</label>
+          ${collages.length ? `<div class="strip" id="cpCollages">${collages.map((c) => `<button type="button" class="tile" data-col="${c.id}" aria-label="Use collage ${esc(c.name || "")}"><img data-path="${esc(c.preview_path || c.layout?.image || "")}" alt=""><span class="cap">${esc(c.name || "Collage")}</span></button>`).join("")}</div>` : '<p class="kv">No collages yet.</p>'}
+        </div>
+        <button class="btn secondary" type="button" id="cpRevert">Use the auto collage</button>
+        <p class="kv">The auto collage is the product layout for this look. Your custom photo stays saved, so Custom photo can turn it back on.</p>
+        <button class="btn secondary" type="button" id="cpBack">Back</button>
+        <div id="cpMsg" class="msg"></div>
+      </div>`);
+    let saving = false;
+    const done = (msg) => { shopHomeSheet(); const card = $("sheetBody").querySelector(`[data-sp="${sp.id}"]`); if (card) card.scrollIntoView({ block: "nearest" }); note("shhMsg", msg); };
+    const useBlob = async (blob) => {
+      if (saving) return; saving = true; note("cpMsg", "Saving…");
+      try { await saveLookCover(sp, blob); done("Photo updated. The storefront tile and the look page use it now."); }
+      catch (e) { saving = false; note("cpMsg", e.message, true); if ($("cpFile")) $("cpFile").value = ""; }
+    };
+    $("cpUpload").onclick = () => $("cpFile").click();
+    $("cpFile").onchange = () => { const f = $("cpFile").files && $("cpFile").files[0]; if (f) useBlob(f); };
+    $("sheetBody").querySelectorAll("[data-gen]").forEach((b) => b.onclick = async () => { const g = state.generations.find((x) => x.id === b.dataset.gen); if (g?.path) try { await useBlob(await blobOf(g.path)); } catch (e) { note("cpMsg", e.message, true); } });
+    $("sheetBody").querySelectorAll("[data-col]").forEach((b) => b.onclick = async () => { const c = state.collages.find((x) => x.id === b.dataset.col); if (c) try { await useBlob(await collageCoverBlob(c)); } catch (e) { note("cpMsg", e.message, true); } });
+    $("cpRevert").onclick = async () => {
+      if (lookUsesAutoCollage(sp)) { note("cpMsg", "This look already uses the auto collage."); return; }
+      if (!confirm("Use the auto collage on the storefront tile and the look page?")) return;
+      if (saving) return; saving = true; note("cpMsg", "Updating…");
+      try { await revertLookCover(sp); done("Back to the auto collage. Custom photo still switches back to your photo."); }
+      catch (e) { saving = false; note("cpMsg", e.message, true); }
+    };
+    $("cpBack").onclick = () => shopHomeSheet();
+  }
   // ---------------------------------------------------------------- storefront: Individual Finds (one public snapshot per clothing item)
   const PRODUCT_CATS = [["tops", "Tops"], ["bottoms", "Bottoms"], ["dresses", "Dresses & One-Pieces"], ["shoes", "Shoes"], ["handbags", "Handbags"], ["accessories", "Accessories"]];
   const productCat = (g) => ({ tops: "tops", bottoms: "bottoms", "one-pieces": "dresses", shoes: "shoes", bag: "handbags", accessory: "accessories" })[g.category] || "accessories";
@@ -2585,21 +2705,25 @@ const ReelEngine = (() => {
       <p class="hint">Your public shopping page for bios. Published outfits appear automatically; use these controls to feature, hide, categorise and write the About section. Visitors only ever see published content.</p>
       <div class="row" style="flex-wrap:wrap;margin-bottom:10px"><button class="btn small" id="shhCopy">Copy storefront link</button><button class="btn secondary small" id="shhOpen">Preview storefront</button></div>
       <p class="kv" style="word-break:break-all">${esc(SHOP_HOME)}</p>
+      <div id="shhMsg" class="msg"></div>
       ${tabs}
       ${tab === "finds" ? findsHtml : tab === "about" ? aboutHtml : `<p class="kv">${store ? `Amazon Storefront button: <span style="word-break:break-all">${esc(store)}</span>` : "No Amazon Storefront link yet — add it under About & links."}</p>
       <div class="stack" id="shhList">${pages.map((p) => { const c = state.collages.find((x) => x.id === p.collage_id); const o = p.outfit_id ? state.outfits.find((x) => x.id === p.outfit_id) : (c?.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null); const hero = o && state.generations.find((g) => g.id === o.hero_generation_id);
+        const tile = shopTilePath(p);
+        const tileSrc = tile ? esc(pubUrl(tile)) + "?v=" + encodeURIComponent(p.updated_at || "") : "";
+        const choice = coverChoice(p);
         return `<div class="card" data-sp="${p.id}" style="margin:0"><div class="row" style="align-items:flex-start">
-          <div style="flex:0 0 72px"><div class="tile" style="width:72px;aspect-ratio:4/5"><img src="${p.published && p.cover_public_path ? esc(pubUrl(p.cover_public_path)) + "?v=" + encodeURIComponent(p.updated_at) : ""}" alt=""></div></div>
+          <div style="flex:0 0 72px"><div class="tile" style="width:72px;aspect-ratio:4/5"><img src="${tileSrc}" alt=""></div></div>
           <div style="flex:1;min-width:0;display:grid;gap:6px">
             <input type="text" data-f="title" value="${esc(p.title)}" placeholder="Display title" aria-label="Display title">
             <select data-f="category" aria-label="Category"><option value="">No category</option>${SHOP_CATEGORIES.map((k) => `<option ${p.category === k ? "selected" : ""}>${k}</option>`).join("")}</select>
             <label class="inline"><input type="checkbox" data-f="listed" ${p.listed !== false ? "checked" : ""}> Show on homepage</label>
             <label class="inline"><input type="checkbox" data-f="featured" ${p.featured ? "checked" : ""}> Feature at the top</label>
-            <div class="chips"><button class="chip ${(p.cover_source || "photo") === "photo" ? "on" : ""}" data-cover="photo" ${hero ? "" : "disabled"}>Cover: AI photo${hero ? "" : " (none set)"}</button><button class="chip ${p.cover_source === "collage" ? "on" : ""}" data-cover="collage">Cover: collage</button></div>
+            <div class="chips"><button type="button" class="chip ${choice === "photo" ? "on" : ""}" data-cover="photo" ${hero ? "" : "disabled"}>Cover: AI photo${hero ? "" : " (none set)"}</button><button type="button" class="chip ${choice === "custom" ? "on" : ""}" data-cover="custom">Custom photo</button><button type="button" class="chip ${choice === "collage" ? "on" : ""}" data-cover="collage">Cover: collage</button></div>
+            <button class="btn secondary" type="button" data-act="photo">Change photo</button>
             <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" data-act="save">Save</button><button class="btn secondary small" data-act="open">Open page</button>${p.published ? '<button class="btn danger small" data-act="unpub">Unpublish</button>' : (c ? '<button class="btn small" data-act="repub">Republish</button>' : "")}</div>
-            <p class="kv">${p.published ? "Published" : "Unpublished (kept, not public)"}${o ? " · outfit: " + esc(o.name) : ""}${hero ? "" : " · set an outfit cover photo under My Photos to use an AI photo cover"}</p>
-          </div></div></div>`; }).join("") || '<div class="empty">No shop pages yet — save an outfit collage and its page is created automatically.</div>'}</div>`}
-      <div id="shhMsg" class="msg"></div>`);
+            <p class="kv">${p.published ? "Published" : "Unpublished (kept, not public)"}${o ? " · outfit: " + esc(o.name) : ""}${!hero && choice !== "custom" ? " · set an outfit cover photo under My Photos to use an AI photo cover" : ""}</p>
+          </div></div></div>`; }).join("") || '<div class="empty">No shop pages yet — save an outfit collage and its page is created automatically.</div>'}</div>`}`);
     $("shhCopy").onclick = () => copyText(SHOP_HOME, "shhMsg"); $("shhOpen").onclick = () => openShopPreview(SHOP_HOME);
     $("sheetBody").querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => shopHomeSheet(b.dataset.tab));
     if (tab === "about") {
@@ -2622,11 +2746,22 @@ const ReelEngine = (() => {
     $("shhList").querySelectorAll("[data-sp]").forEach((card) => {
       const sp = state.shops.find((x) => x.id === card.dataset.sp); const c = state.collages.find((x) => x.id === sp.collage_id);
       const f = (k) => card.querySelector(`[data-f="${k}"]`);
-      card.querySelector('[data-act="save"]').onclick = async () => { try { await updateShopPage(sp, { title: f("title").value.trim() || sp.title, category: f("category").value || null, listed: f("listed").checked, featured: f("featured").checked }); note("shhMsg", "Saved — the homepage updates immediately."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } };
+      card.querySelector('[data-act="save"]').onclick = async () => { try { await updateShopPage(sp, { title: f("title").value.trim() || sp.title, category: f("category").value || null, listed: f("listed").checked, featured: f("featured").checked }); shopHomeSheet(); note("shhMsg", "Saved — the homepage updates immediately."); } catch (e) { note("shhMsg", e.message, true); } };
       card.querySelector('[data-act="open"]').onclick = () => openShopPreview(shopLink(sp));
-      card.querySelectorAll("[data-cover]").forEach((b) => b.onclick = async () => { if (!c?.layout?.layers) { note("shhMsg", "This page's collage is gone — republish from a collage first.", true); return; } try { note("shhMsg", "Updating cover…"); await publishShopFor(c, c.layout, { cover_source: b.dataset.cover }); note("shhMsg", "Cover updated (no credits used)."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } });
-      const un = card.querySelector('[data-act="unpub"]'); if (un) un.onclick = async () => { if (!confirm("Unpublish this outfit? Its page and homepage card go offline; nothing is deleted and you can republish any time.")) return; try { await unpublishShop(sp); note("shhMsg", "Unpublished."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } };
-      const re = card.querySelector('[data-act="repub"]'); if (re) re.onclick = async () => { try { note("shhMsg", "Publishing…"); await publishShopFor(c, c.layout, {}); note("shhMsg", "Republished at the same link."); shopHomeSheet(); } catch (e) { note("shhMsg", e.message, true); } };
+      card.querySelector('[data-act="photo"]').onclick = () => changePhotoSheet(sp.id);
+      card.querySelectorAll("[data-cover]").forEach((b) => b.onclick = async () => {
+        if (b.disabled || coverChoice(sp) === b.dataset.cover) return;
+        try {
+          note("shhMsg", "Updating cover…");
+          if (b.dataset.cover === "custom") { const ok = await useCustomCover(sp); if (!ok) return; }
+          else if (b.dataset.cover === "collage") await revertLookCover(sp);
+          else await useAiCover(sp);
+          shopHomeSheet(); const cardNow = $("sheetBody").querySelector(`[data-sp="${sp.id}"]`); if (cardNow) cardNow.scrollIntoView({ block: "nearest" });
+          note("shhMsg", b.dataset.cover === "custom" ? "Custom photo is the cover." : b.dataset.cover === "collage" ? "Cover is the auto collage." : "Cover is the AI photo.");
+        } catch (e) { note("shhMsg", e.message, true); }
+      });
+      const un = card.querySelector('[data-act="unpub"]'); if (un) un.onclick = async () => { if (!confirm("Unpublish this outfit? Its page and homepage card go offline; nothing is deleted and you can republish any time.")) return; try { await unpublishShop(sp); shopHomeSheet(); note("shhMsg", "Unpublished."); } catch (e) { note("shhMsg", e.message, true); } };
+      const re = card.querySelector('[data-act="repub"]'); if (re) re.onclick = async () => { try { note("shhMsg", "Publishing…"); await publishShopFor(c, c.layout, {}); shopHomeSheet(); note("shhMsg", "Republished at the same link."); } catch (e) { note("shhMsg", e.message, true); } };
     });
   }
   $("shopHomeBtn").addEventListener("click", () => shopHomeSheet("looks"));
@@ -3265,7 +3400,7 @@ const ReelEngine = (() => {
     $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   });
   if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-    window.__studio = { state, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList };
+    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice };
   }
 })();
 </script>
