@@ -2452,6 +2452,7 @@ const ReelEngine = (() => {
       if (!shopEligible(g, !!image_path)) continue;
       items.push({ ...common, image_path });
     }
+    const pageItems = withManualShopItems(items, prev.items);   // Amazon links added from the Storefront editor are not on the collage
     // Homepage cover: the outfit's AI photo (the photo set as outfit cover) by default, the collage when chosen or when
     // there is no photo. Always a plain copy of an existing image — publishing never generates anything or spends credits.
     const o = c.outfit_id ? state.outfits.find((x) => x.id === c.outfit_id) : null;
@@ -2460,7 +2461,7 @@ const ReelEngine = (() => {
     let cover_public_path = autoPath;
     if (coverSource === "photo" && hero) { try { await uploadPublic(`${base}/cover.jpg`, await shrink(await blobOf(hero.path), 1080, "image/jpeg", 0.88)); cover_public_path = `${base}/cover.jpg`; } catch (e) { console.warn("cover copy failed, using collage", e); } }
     const row = { collage_id: c.id, outfit_id: c.outfit_id || null, slug, title: opts.title || prev.title || c.name || "This outfit", caption: opts.caption !== undefined ? (opts.caption || null) : (prev.caption ?? null),
-      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path, items, published: true, updated_at: new Date().toISOString(),
+      disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), collage_public_path, items: pageItems, published: true, updated_at: new Date().toISOString(),
       listed: prev.listed ?? true, featured: prev.featured ?? false, sort_order: prev.sort_order ?? 0, category: opts.category !== undefined ? opts.category : (prev.category ?? null),
       cover_source: coverSource, cover_public_path, storefront_url: state.settings.amazon_storefront_url || null };
     const write = (r) => sp ? sb.from("shop_pages").update(r).eq("id", sp.id).eq("user_id", state.uid) : sb.from("shop_pages").insert(r);
@@ -2506,9 +2507,144 @@ const ReelEngine = (() => {
       if (!shopEligible(g, !!image_path)) continue;
       items.push({ ...common, image_path });
     }
-    const { error } = await sb.from("shop_pages").update({ items, disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid);
+    const pageItems = withManualShopItems(items, sp.items);
+    const { error } = await sb.from("shop_pages").update({ items: pageItems, disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid);
     if (error) throw new Error(error.message);
     await loadAll(); return shopFor({ id: sp.collage_id, outfit_id: sp.outfit_id }) || shopOf(sp.collage_id);
+  }
+  // Links pasted on the Storefront edit screen are not clothing rows. Keep them when a collage republish rebuilds the list.
+  function withManualShopItems(items, prev) {
+    const out = [...(items || [])];
+    const urls = new Set(out.map((it) => it && it.url).filter(Boolean));
+    const ids = new Set(out.map((it) => it && it.garment_id).filter(Boolean));
+    for (const it of prev || []) {
+      if (!it?.manual) continue;
+      if (it.garment_id && ids.has(it.garment_id)) continue;
+      if (it.url && urls.has(it.url)) continue;
+      out.push(it);
+      if (it.url) urls.add(it.url);
+      if (it.garment_id) ids.add(it.garment_id);
+    }
+    return out;
+  }
+  const amazonLink = (u) => /^https:\/\/([a-z0-9-]+\.)*(amazon\.[a-z.]+|amzn\.(to|com|eu|asia|in)|a\.co)\//i.test(u || "");
+  async function shopItemFromGarment(sp, g) {
+    if (!(g.name || "").trim()) throw new Error("This item needs a name first.");
+    const base = `${state.uid}/${sp.slug}`;
+    if (isApi(g)) {
+      if (!shopEligible(g, !!g.image_url)) throw new Error("This item needs an Amazon link.");
+      return { garment_id: g.id, name: shortName(g.name) || g.name, full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: null, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null };
+    }
+    const src = publishableSrc(g);
+    let image_path = null;
+    if (src) {
+      try {
+        const png = String(src).endsWith(".png");
+        const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85);
+        if (blob) { image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
+      } catch (e) { console.warn("look item image", e); }
+    }
+    if (!shopEligible(g, !!image_path)) throw new Error("Add an Amazon link on the item, or a cutout, before it can go on the look page.");
+    return { garment_id: g.id, name: shortName(g.name) || g.name, full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: null, image_path };
+  }
+  async function rememberOnOutfit(sp, gid) {
+    const o = lookOutfit(sp); if (!o || (o.items || []).includes(gid)) return;
+    const { error } = await sb.from("outfit_items").insert({ outfit_id: o.id, garment_id: gid, position: (o.items || []).length });
+    if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message);
+    await loadAll();
+  }
+  async function forgetOnOutfit(sp, gid) {
+    const o = lookOutfit(sp); if (!o) return;
+    const { error } = await sb.from("outfit_items").delete().eq("outfit_id", o.id).eq("garment_id", gid);
+    if (error) throw new Error(error.message);
+    await loadAll();
+  }
+  async function addLookGarment(sp, gid) {
+    const g = garment(gid); if (!g) throw new Error("That item is no longer in My Clothing.");
+    const items = [...(sp.items || [])];
+    if (items.some((it) => it.garment_id === gid)) throw new Error("Already on this look.");
+    items.push(await shopItemFromGarment(sp, g));
+    await updateShopPage(sp, { items });
+    await rememberOnOutfit(sp, gid);
+  }
+  async function addLookLink(sp, rawUrl, name) {
+    const t = tagAmazon(rawUrl, state.settings.amazon_tag);
+    if (!t.url || !amazonLink(t.url) || /Not an Amazon|valid URL/.test(t.note || "")) throw new Error("Paste an Amazon product link.");
+    const items = [...(sp.items || [])];
+    if (items.some((it) => it.url === t.url || (t.asin && String(it.url || "").toUpperCase().includes(t.asin)))) throw new Error("That link is already on this look.");
+    const match = t.asin && state.garments.find((g) => (g.asin || "").toUpperCase() === t.asin || String(g.affiliate_url || g.product_url || "").toUpperCase().includes(t.asin));
+    if (match) {
+      if (items.some((it) => it.garment_id === match.id)) throw new Error(`${match.name} is already on this look.`);
+      items.push(await shopItemFromGarment(sp, match));
+      await updateShopPage(sp, { items });
+      await rememberOnOutfit(sp, match.id);
+      return t.note ? `Added ${match.name}. ${t.note}` : `Added ${match.name}.`;
+    }
+    const title = (name || "").trim();
+    if (!title) throw new Error("Add a name so it shows on the look page.");
+    items.push({ manual: true, garment_id: null, name: shortName(title) || title, full_name: title, brand: "", url: t.url, hotspot: null, image_path: null });
+    await updateShopPage(sp, { items });
+    return t.note ? `Added. ${t.note}` : "Added to the look page.";
+  }
+  async function removeLookItem(sp, index) {
+    const items = [...(sp.items || [])];
+    const it = items[index]; if (!it) return;
+    items.splice(index, 1);
+    await updateShopPage(sp, { items });
+    if (it.garment_id) await forgetOnOutfit(sp, it.garment_id);
+  }
+  function lookItemsSheet(id) {
+    const sp = state.shops.find((x) => x.id === id); if (!sp) return;
+    const items = sp.items || [];
+    const onLook = new Set(items.map((it) => it.garment_id).filter(Boolean));
+    const choices = state.garments.filter((g) => g && (g.name || "").trim() && !onLook.has(g.id));
+    const thumb = (it) => {
+      if (it.image_path) return `<img src="${esc(pubUrl(it.image_path))}" alt="" style="width:44px;height:56px;object-fit:cover;border-radius:8px;background:var(--soft)">`;
+      if (it.image_url) return `<img src="${esc(it.image_url)}" alt="" style="width:44px;height:56px;object-fit:contain;border-radius:8px;background:#fff">`;
+      const g = it.garment_id && garment(it.garment_id);
+      return g ? `<img ${imgAttr(g, "thumb")} alt="" style="width:44px;height:56px;object-fit:contain;border-radius:8px;background:#fff">` : `<div style="width:44px;height:56px;border-radius:8px;background:var(--soft)"></div>`;
+    };
+    openSheet(`<h3>Items</h3>
+      <p class="hint">${esc(sp.title)}. These products are on the look page. The cover photo stays as it is.</p>
+      <div class="stack" id="liList">${items.map((it, i) => `<div class="row" style="align-items:center">
+          ${thumb(it)}
+          <div style="flex:1;min-width:0"><strong style="font-size:14px">${esc(it.name || "Item")}</strong><div class="kv">${it.url ? "Amazon link on the look page" : "No Amazon link yet"}</div></div>
+          <button type="button" class="btn danger small" data-rm="${i}" style="flex:none">Remove</button>
+        </div>`).join("") || '<p class="kv">No products on this look page yet.</p>'}
+      </div>
+      <h3>Add from My Clothing</h3>
+      ${choices.length ? `<div class="strip" id="liPick">${choices.map((g) => `<button type="button" class="tile contain" data-add="${g.id}" aria-label="Add ${esc(g.name)}"><img ${imgAttr(g, "thumb")} alt=""><span class="cap">${esc(g.name)}</span></button>`).join("")}</div>` : '<p class="kv">Every clothing item is already on this look, or My Clothing is empty.</p>'}
+      <h3>Add an Amazon link</h3>
+      <div class="stack">
+        <div><label>Amazon link</label><input type="url" id="liUrl" placeholder="https://www.amazon.com/dp/…" inputmode="url" autocapitalize="none"></div>
+        <p class="kv" id="liNote" style="margin:0">${state.settings.amazon_tag ? "Your tracking ID is added when the link doesn’t already have one." : "Set your Amazon tracking ID under Account to tag new links."}</p>
+        <div><label>Name on the look page</label><input type="text" id="liName" placeholder="Gold hoops"></div>
+        <button class="btn" type="button" id="liAdd">Add to this look</button>
+        <button class="btn secondary" type="button" id="liBack">Back</button>
+        <div id="liMsg" class="msg"></div>
+      </div>`);
+    const fresh = () => state.shops.find((x) => x.id === id);
+    const back = (msg) => { lookItemsSheet(id); if (msg) note("liMsg", msg); };
+    $("liList").querySelectorAll("[data-rm]").forEach((b) => b.onclick = async () => {
+      const cur = fresh(); const it = cur?.items?.[+b.dataset.rm]; if (!it) return;
+      if (!confirm(`Remove “${it.name || "this item"}” from the look page? It stays in My Clothing.`)) return;
+      try { note("liMsg", "Removing…"); await removeLookItem(cur, +b.dataset.rm); back("Removed from the look page."); }
+      catch (e) { note("liMsg", e.message, true); }
+    });
+    $("liPick")?.querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => {
+      const cur = fresh(); if (!cur) return;
+      b.disabled = true; note("liMsg", "Adding…");
+      try { await addLookGarment(cur, b.dataset.add); back("Added to the look page."); }
+      catch (e) { b.disabled = false; note("liMsg", e.message, true); }
+    });
+    $("liUrl").oninput = () => { const t = tagAmazon($("liUrl").value, state.settings.amazon_tag); $("liNote").textContent = t.note || (state.settings.amazon_tag ? "Your tracking ID is added when the link doesn’t already have one." : "Set your Amazon tracking ID under Account to tag new links."); };
+    $("liAdd").onclick = async () => {
+      const cur = fresh(); if (!cur) return;
+      $("liAdd").disabled = true; note("liMsg", "Adding…");
+      try { const msg = await addLookLink(cur, $("liUrl").value, $("liName").value); back(msg); }
+      catch (e) { $("liAdd").disabled = false; note("liMsg", e.message, true); }
+    };
+    $("liBack").onclick = () => { shopHomeSheet(); const card = $("sheetBody").querySelector(`[data-sp="${id}"]`); if (card) card.scrollIntoView({ block: "nearest" }); };
   }
   // One shoppable page per outfit. An existing page keeps its collage and only refreshes products when the snapshot
   // is behind the saved items. A missing page is created with the current collage (the first time needs that image).
@@ -2721,6 +2857,7 @@ const ReelEngine = (() => {
             <label class="inline"><input type="checkbox" data-f="featured" ${p.featured ? "checked" : ""}> Feature at the top</label>
             <div class="chips"><button type="button" class="chip ${choice === "photo" ? "on" : ""}" data-cover="photo" ${hero ? "" : "disabled"}>Cover: AI photo${hero ? "" : " (none set)"}</button><button type="button" class="chip ${choice === "custom" ? "on" : ""}" data-cover="custom">Custom photo</button><button type="button" class="chip ${choice === "collage" ? "on" : ""}" data-cover="collage">Cover: collage</button></div>
             <button class="btn secondary" type="button" data-act="photo">Change photo</button>
+            <button class="btn secondary" type="button" data-act="items">Edit items${(p.items || []).length ? ` (${(p.items || []).length})` : ""}</button>
             <div class="row" style="flex-wrap:wrap"><button class="btn secondary small" data-act="save">Save</button><button class="btn secondary small" data-act="open">Open page</button>${p.published ? '<button class="btn danger small" data-act="unpub">Unpublish</button>' : (c ? '<button class="btn small" data-act="repub">Republish</button>' : "")}</div>
             <p class="kv">${p.published ? "Published" : "Unpublished (kept, not public)"}${o ? " · outfit: " + esc(o.name) : ""}${!hero && choice !== "custom" ? " · set an outfit cover photo under My Photos to use an AI photo cover" : ""}</p>
           </div></div></div>`; }).join("") || '<div class="empty">No shop pages yet — save an outfit collage and its page is created automatically.</div>'}</div>`}`);
@@ -2749,6 +2886,7 @@ const ReelEngine = (() => {
       card.querySelector('[data-act="save"]').onclick = async () => { try { await updateShopPage(sp, { title: f("title").value.trim() || sp.title, category: f("category").value || null, listed: f("listed").checked, featured: f("featured").checked }); shopHomeSheet(); note("shhMsg", "Saved — the homepage updates immediately."); } catch (e) { note("shhMsg", e.message, true); } };
       card.querySelector('[data-act="open"]').onclick = () => openShopPreview(shopLink(sp));
       card.querySelector('[data-act="photo"]').onclick = () => changePhotoSheet(sp.id);
+      card.querySelector('[data-act="items"]').onclick = () => lookItemsSheet(sp.id);
       card.querySelectorAll("[data-cover]").forEach((b) => b.onclick = async () => {
         if (b.disabled || coverChoice(sp) === b.dataset.cover) return;
         try {
@@ -3400,7 +3538,7 @@ const ReelEngine = (() => {
     $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   });
   if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice };
+    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems };
   }
 })();
 </script>

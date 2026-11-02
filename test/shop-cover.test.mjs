@@ -133,7 +133,7 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
       const s = window.__studio.state;
       s.uid = "user-1";
       s.me = { presets: {}, used_today: 0, daily_cap: 20, email: "heather@example.com", tz: "America/Chicago", actions: {} };
-      s.garments = [];
+      s.garments = [{ id: "g-bag", name: "Black tote", brand: "", affiliate_url: "https://www.amazon.com/dp/B00BAG1234?tag=heather-20", asin: "B00BAG1234", path: "studio/bag.jpg", cutout_path: "studio/bag.jpg" }];
       s.outfits = [{ id: "o-cozy", name: "Cozy Espresso", items: [], hero_generation_id: null }];
       s.generations = [{ id: "gen-1", path: "studio/gen-1.jpg", outfit_id: "o-cozy", created_at: "2026-10-01T00:00:00Z" }];
       s.collages = [
@@ -152,9 +152,10 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
           cover_source: "collage", cover_public_path: "user-1/hyzzf1gkg9/collage.jpg",
           collage_public_path: "user-1/hyzzf1gkg9/custom.jpg", collage_id: "c-olive", outfit_id: null,
           category: null, featured: false, sort_order: 0, updated_at: "2026-11-02T20:45:08.066Z",
+          items: [{ garment_id: "g-old", name: "Olive leggings", full_name: "Olive leggings", url: "https://www.amazon.com/dp/B00LEG1234?tag=heather-20", brand: "" }],
         },
       ];
-      s.products = []; s.site = null; s.settings = {}; s.fbPosts = []; s.reels = []; s._outfitItems = [];
+      s.products = []; s.site = null; s.settings = { amazon_tag: "heather-20" }; s.fbPosts = []; s.reels = []; s._outfitItems = [];
       document.getElementById("login").classList.add("hidden");
       document.getElementById("app").classList.remove("hidden");
       document.getElementById("nav").classList.remove("hidden");
@@ -307,6 +308,40 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
     assert.equal((await chips("cozy")).custom, true);
 
     await page.screenshot({ path: "/opt/cursor/artifacts/storefront-editor-after-change.png" });
+
+    const kept = await page.evaluate(() => window.__studio.withManualShopItems(
+      [{ garment_id: "g1", name: "Tee", url: "https://www.amazon.com/dp/B000000001?tag=heather-20" }],
+      [{ manual: true, name: "Gold hoops", url: "https://www.amazon.com/dp/B0TEST1234?tag=heather-20" }],
+    ));
+    assert.equal(kept.length, 2);
+    assert.equal(kept[1].name, "Gold hoops");
+
+    await page.click('[data-sp="olive"] [data-act="items"]');
+    await page.waitForSelector("#liAdd");
+    assert.match(await page.$eval("#sheetBody h3", (el) => el.textContent), /Items/);
+    assert.match(await page.$eval("#liList", (el) => el.textContent), /Olive leggings/);
+    const addH = await page.$eval("#liAdd", (el) => el.getBoundingClientRect().height);
+    assert.ok(addH >= 44);
+    await page.click('#liPick [data-add="g-bag"]');
+    await page.waitForFunction(() => (document.getElementById("liMsg")?.textContent || "").includes("Added to the look page"));
+    assert.match(await page.$eval("#liList", (el) => el.textContent), /Black tote/);
+    const addedItems = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "update"))).at(-1).patch.items;
+    assert.equal(addedItems.some((it) => it.garment_id === "g-bag" && it.url.includes("tag=heather-20")), true);
+    assert.equal(addedItems.some((it) => it.garment_id === "g-old"), true);
+
+    await page.click('#liList [data-rm="0"]');
+    await page.waitForFunction(() => (document.getElementById("liMsg")?.textContent || "").includes("Removed"));
+    assert.equal(await page.$eval("#liList", (el) => el.textContent.includes("Olive leggings")), false);
+
+    await page.$eval("#liUrl", (el) => { el.value = "https://www.amazon.com/dp/B0TEST1234"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+    await page.type("#liName", "Gold hoops");
+    await page.click("#liAdd");
+    await page.waitForFunction(() => /Added/.test(document.getElementById("liMsg")?.textContent || ""));
+    const linked = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "update"))).at(-1).patch.items;
+    const hoops = linked.find((it) => it.manual);
+    assert.equal(hoops.name, "Gold hoops");
+    assert.equal(hoops.url, "https://www.amazon.com/dp/B0TEST1234?tag=heather-20");
+    await page.screenshot({ path: "/opt/cursor/artifacts/edit-items-phone.png" });
 
     await page.goto(`http://127.0.0.1:${port}/shop.html`, { waitUntil: "domcontentloaded" });
     const fromShop = await page.evaluate(() => shopTilePath({
