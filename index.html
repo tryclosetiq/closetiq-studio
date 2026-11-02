@@ -349,7 +349,7 @@
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js"></script>
+<script src="shop-cover.js?v=5"></script>
 <script>
 // Decorative collage backgrounds — original procedural SVG, no external assets.
 // Each design renders at any W×H with normalized placement, so the on-screen stage, the saved
@@ -2951,7 +2951,7 @@ const ReelEngine = (() => {
   }
   // Homepage management helpers (all plain row updates on the owner's own shop pages — no rendering, no credits).
   const SHOP_HOME = SHOP_BASE.replace(/\?o=$/, "");
-  const fromStudio = (link) => { const u = new URL(link); u.searchParams.set("from", "studio"); return u.toString(); };   // shop.html shows "‹ Back to Studio" when opened this way
+  const fromStudio = (link) => { const u = new URL(link); u.searchParams.set("from", "studio"); return u.toString(); };   // kept on in-shop links; Back to Studio shows when her Studio session is present
   const ABOUT_DEFAULT = "ClosetIQ is a separate AI wardrobe and personal styling app that helps you organize your closet, create outfits from clothes you already own, and discover personalized styling ideas.";
   const SHOP_CATEGORIES = ["Everyday Casual", "Workwear", "Date Night", "Going Out", "Vacation", "Athleisure"];
   const pubUrl = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
