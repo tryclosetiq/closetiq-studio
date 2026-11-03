@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#f5efe6">
 <title>ClosetIQ Studio</title>
 <script>
-window.BUILD = "7";
+window.BUILD = "8";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   async function checkBuild() {
@@ -204,6 +204,8 @@ window.BUILD = "7";
     <h2>My Clothing</h2>
     <p class="hint">Clean product images with names and affiliate links.</p>
     <div class="row" style="margin-bottom:8px"><button class="btn" id="amazonSearch">Search Amazon</button><button class="btn secondary" id="amazonLink">Add from Amazon link</button></div>
+    <div class="row" style="margin-bottom:8px"><button class="btn secondary" id="fillNames">Fill missing names</button></div>
+    <div id="fillNamesMsg" class="msg"></div>
     <div class="row" style="margin-bottom:10px"><button class="btn secondary" id="collageFromClothing">Make a collage from clothing</button></div>
     <div class="grid" id="garmentGrid"></div>
     <input id="garmentFile" type="file" accept="image/*" class="hidden">
@@ -373,7 +375,7 @@ window.BUILD = "7";
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=7"></script>
+<script src="shop-cover.js?v=8"></script>
 <script>
 // Decorative collage backgrounds — original procedural SVG, no external assets.
 // Each design renders at any W×H with normalized placement, so the on-screen stage, the saved
@@ -638,6 +640,114 @@ const ReelEngine = (() => {
     const b = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(b.error || ("HTTP " + r.status));
     return b;
+  }
+  // A blank name, or a name that is only a closet category, can be replaced from the product page.
+  // Anything she typed herself is left alone.
+  const CATEGORY_NAME = /^(tops?|bottoms?|shoes?|accessor(?:y|ies)|dress(?:es)?|outerwear|bags?|jewel(?:le)?ry|item|one-pieces?|accessory|handbags?)$/i;
+  const needsProductName = (name) => { const s = String(name || "").trim(); return !s || CATEGORY_NAME.test(s); };
+  const titledName = (info) => {
+    const short = String(info?.short_title || "").replace(/\s+/g, " ").trim();
+    const brand = String(info?.brand || "").replace(/\s+/g, " ").trim();
+    if (!short) return "";
+    if (!brand || short.toLowerCase().startsWith(brand.toLowerCase())) return short;
+    return brand + " " + short;
+  };
+  const FILL_NAME_GAP_MS = 1500;
+  async function lookupProductTitle(raw) {
+    const text = String(raw || "").trim();
+    if (!/https?:\/\//i.test(text)) return null;
+    let access = "";
+    try { access = await token(); } catch { return null; }
+    if (!access) return null;
+    try {
+      const r = await fetch(SUPABASE_URL + "/functions/v1/product-title", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + access, apikey: ANON_KEY, "content-type": "application/json" },
+        body: JSON.stringify({ url: text }),
+      });
+      const b = await r.json().catch(() => null);
+      if (!r.ok || !b || b.blocked || b.error || !String(b.short_title || "").trim()) return null;
+      return b;
+    } catch { return null; }
+  }
+  function applyProductTitleFields(info, opts) {
+    if (!info) return;
+    const nameEl = opts.nameId ? $(opts.nameId) : null;
+    const name = titledName(info);
+    if (nameEl && name && needsProductName(nameEl.value)) nameEl.value = name;
+    const brandEl = opts.brandId ? $(opts.brandId) : null;
+    if (brandEl && !brandEl.value.trim() && info.brand) brandEl.value = info.brand;
+    const urlEl = opts.urlId ? $(opts.urlId) : null;
+    if (urlEl && info.asin) urlEl.dataset.lookedAsin = info.asin;
+  }
+  // Blur, paste, and an explicit ensure() used on save. A typed name is never replaced.
+  function watchProductLink(urlId, opts) {
+    const urlEl = $(urlId);
+    if (!urlEl) return async () => {};
+    if (urlEl.dataset.nameWatch === "1" && urlEl._ensureName) return urlEl._ensureName;
+    urlEl.dataset.nameWatch = "1";
+    let seq = 0;
+    const show = (t) => { if (opts.msgId && $(opts.msgId)) note(opts.msgId, t); };
+    const clear = () => { const el = opts.msgId && $(opts.msgId); if (el && el.textContent.includes("Looking up name")) note(opts.msgId, ""); };
+    const run = async () => {
+      const nameEl = opts.nameId ? $(opts.nameId) : null;
+      if (nameEl && !needsProductName(nameEl.value)) return null;
+      const raw = urlEl.value.trim();
+      if (!/https?:\/\//i.test(raw)) return null;
+      const mine = ++seq;
+      show("Looking up name…");
+      const info = await lookupProductTitle(raw);
+      if (mine !== seq) return null;
+      clear();
+      if (!info) return null;
+      applyProductTitleFields(info, { ...opts, urlId });
+      return info;
+    };
+    const ensure = async () => {
+      if (urlEl._nameLookup) { try { await urlEl._nameLookup; } catch { /* the field stays as she left it */ } }
+      const nameEl = opts.nameId ? $(opts.nameId) : null;
+      if (!nameEl || needsProductName(nameEl.value)) await run();
+    };
+    urlEl._ensureName = ensure;
+    urlEl.addEventListener("blur", () => { urlEl._nameLookup = run(); });
+    urlEl.addEventListener("paste", () => setTimeout(() => { urlEl._nameLookup = run(); }, 0));
+    return ensure;
+  }
+  async function fillGarmentName(g) {
+    if (!g || !g.id || !needsProductName(g.name)) return g;
+    const link = String(g.affiliate_url || g.product_url || "").trim();
+    if (!link) return g;
+    const info = await lookupProductTitle(link);
+    const name = info && titledName(info);
+    if (!name || !needsProductName(g.name)) return g;
+    const patch = { name };
+    if (!String(g.brand || "").trim() && info.brand) patch.brand = info.brand;
+    if (!g.asin && info.asin) patch.asin = info.asin;
+    let { error } = await sb.from("garments").update(patch).eq("id", g.id).eq("user_id", state.uid);
+    if (error) ({ error } = await sb.from("garments").update(patch).eq("id", g.id));
+    if (error) return g;
+    const row = state.garments.find((x) => x.id === g.id);
+    if (row) Object.assign(row, patch);
+    Object.assign(g, patch);
+    return row || g;
+  }
+  async function fillMissingNames(msgId, btn) {
+    const todo = state.garments.filter((g) => g && needsProductName(g.name) && (g.affiliate_url || g.product_url));
+    if (!todo.length) { note(msgId, "Every linked item already has a name."); return; }
+    if (btn) btn.disabled = true;
+    let filled = 0;
+    try {
+      for (let i = 0; i < todo.length; i++) {
+        note(msgId, `Looking up name… ${i + 1} of ${todo.length}`);
+        const g = garment(todo[i].id) || todo[i];
+        const before = g.name || "";
+        const updated = await fillGarmentName(g);
+        if (updated && updated.name && updated.name !== before && !needsProductName(updated.name)) filled++;
+        if (i < todo.length - 1) await new Promise((r) => setTimeout(r, FILL_NAME_GAP_MS));
+      }
+      await loadAll();
+      note(msgId, filled ? `Filled ${filled} name${filled === 1 ? "" : "s"}.` : "No names came back. You can type them in.");
+    } finally { if (btn) btn.disabled = false; }
   }
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault(); $("loginMsg").textContent = "";
@@ -1057,6 +1167,7 @@ const ReelEngine = (() => {
     amazonLinkSheet("", true);
   });
   $("amazonLink").addEventListener("click", () => amazonLinkSheet("", false));
+  $("fillNames").addEventListener("click", () => fillMissingNames("fillNamesMsg", $("fillNames")));
   // Plain Amazon search URL (no tag — tags belong on product links only). Price filter is in cents.
   const amazonSearchUrl = (q, maxUsd) => "https://www.amazon.com/s?i=fashion&k=" + encodeURIComponent(q) + (maxUsd ? "&rh=p_36%3A0-" + Math.round(maxUsd * 100) : "");
   let pendingAmazon = null;
@@ -1071,8 +1182,27 @@ const ReelEngine = (() => {
         <div id="alMsg" class="msg"></div></div>`);
     const check = () => { const t = tagAmazon($("alUrl").value, state.settings.amazon_tag); $("alNote").textContent = t.note; $("alPhoto").disabled = !$("alUrl").value.trim(); return t; };
     $("alUrl").oninput = check; check();
-    $("alPaste").onclick = async () => { try { $("alUrl").value = (await navigator.clipboard.readText()).trim(); check(); } catch { note("alMsg", "Clipboard access was blocked — long-press the field and choose Paste.", true); } };
-    $("alPhoto").onclick = () => { pendingAmazon = { url: $("alUrl").value.trim(), ...extra }; $("amazonFile").click(); };
+    let looked = null, inflight = null;
+    const lookupAl = async () => {
+      const raw = $("alUrl").value.trim();
+      if (!/https?:\/\//i.test(raw)) return null;
+      note("alMsg", "Looking up name…");
+      const info = await lookupProductTitle(raw);
+      if ($("alMsg") && $("alMsg").textContent.includes("Looking up name")) note("alMsg", "");
+      looked = info;
+      return info;
+    };
+    $("alUrl").addEventListener("blur", () => { inflight = lookupAl(); });
+    $("alUrl").addEventListener("paste", () => setTimeout(() => { inflight = lookupAl(); }, 0));
+    $("alPaste").onclick = async () => { try { $("alUrl").value = (await navigator.clipboard.readText()).trim(); check(); inflight = lookupAl(); await inflight; } catch { note("alMsg", "Clipboard access was blocked — long-press the field and choose Paste.", true); } };
+    $("alPhoto").onclick = () => {
+      const pending = { url: $("alUrl").value.trim(), ...extra };
+      if (looked && needsProductName(pending.name)) pending.name = titledName(looked);
+      if (looked && !pending.brand && looked.brand) pending.brand = looked.brand;
+      if (looked && looked.asin) pending.asin = looked.asin;
+      pendingAmazon = pending;
+      $("amazonFile").click();
+    };
   }
   $("amazonFile").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; const p = pendingAmazon; pendingAmazon = null; if (f) { closeSheet(); importWizard(f, p || {}); } });
   function garmentFields(x = {}) {
@@ -1087,7 +1217,7 @@ const ReelEngine = (() => {
   function readGarmentFields() {
     const tagged = tagAmazon($("gUrl").value, state.settings.amazon_tag);
     return { name: $("gName").value.trim(), brand: $("gBrand").value.trim(), category: $("gCat").value, notes: $("gNotes").value.trim(), public_ok: $("gPublic").checked,
-      affiliate_url: tagged.url, product_url: $("gUrl").value.trim(), asin: tagged.asin || null };
+      affiliate_url: tagged.url, product_url: $("gUrl").value.trim(), asin: tagged.asin || ($("gUrl") && $("gUrl").dataset.lookedAsin) || null };
   }
   function tagAmazon(input, tag) {
     input = (input || "").trim(); if (!input) return { url: "", asin: null, note: "" };
@@ -1126,6 +1256,8 @@ const ReelEngine = (() => {
     if (prefill.url) { $("gUrl").value = prefill.url; $("gUrlNote").textContent = tagAmazon(prefill.url, state.settings.amazon_tag).note; }
     if (prefill.category) $("gCat").value = prefill.category;
     if (prefill.name) $("gName").value = prefill.name;
+    if (prefill.brand) $("gBrand").value = prefill.brand;
+    if (prefill.asin) $("gUrl").dataset.lookedAsin = prefill.asin;
     if (replacing) { $("gBrand").value = replacing.brand || ""; $("gNotes").value = replacing.notes || ""; $("gPublic").checked = !!replacing.public_ok; $("iwBody").insertAdjacentHTML("afterbegin", `<p class="hint" style="margin:0 0 8px"><strong>Replacing the photo of “${esc(replacing.name)}”.</strong> Name, link and details below stay unless you change them.</p>`); }
     $("importer").classList.remove("hidden"); $("importer").scrollTop = 0; document.body.style.overflow = "hidden";
 
@@ -1152,6 +1284,8 @@ const ReelEngine = (() => {
     $("iwReset").onclick = () => { crop = { ...start }; paint(); };
     $("iwFull").onclick = () => { crop = { x: 0, y: 0, w: 1, h: 1 }; paint(); };
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
+    const ensureIwName = watchProductLink("gUrl", { nameId: "gName", brandId: "gBrand", msgId: "iwMsg" });
+    if ($("gUrl").value.trim() && needsProductName($("gName").value)) ensureIwName();
     const cropped = () => shrink(file, 1600, "image/jpeg", 0.9, crop);   // the framed area is what gets saved, tried on and extracted
     async function extract() {
       if (!confirmSpend(cost("extract"), "Recreate just the clothing from the framed area (FASHN Edit). You'll preview it before saving.")) return;
@@ -1167,8 +1301,10 @@ const ReelEngine = (() => {
     $("iwKeep").onclick = () => { note("iwMsg", "Cutout will be saved with this item. Fill in the details below and tap Save."); $("iwKeep").classList.add("on"); };
     $("iwOrig").onclick = () => { cutout = null; cutoutPath = null; $("iwPreviewWrap").classList.add("hidden"); note("iwMsg", "Using the framed original."); };
     $("iwSave").onclick = async () => {
-      $("iwSave").disabled = true; note("iwMsg", "Saving…");
+      $("iwSave").disabled = true;
       try {
+        await ensureIwName();
+        note("iwMsg", "Saving…");
         const id = replacing ? replacing.id : crypto.randomUUID(), base = `${state.uid}/garments/${id}`;
         const [source, full, thumb] = await Promise.all([shrink(file, 1600), cropped(), shrink(file, 480, "image/jpeg", 0.8, crop)]);
         await upload(base + "_src.jpg", source); await upload(base + ".jpg", full); await upload(base + "_t.jpg", thumb);
@@ -1216,7 +1352,14 @@ const ReelEngine = (() => {
       } catch (e) { note("gMsg", e.message, true); }
     });
     $("gUrl").oninput = () => { $("gUrlNote").textContent = tagAmazon($("gUrl").value, state.settings.amazon_tag).note; };
-    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update(readGarmentFields()).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) { await loadAll(); try { const n = await syncShopPagesForGarment(x.id); const m = await syncProductForGarment(x.id); if (n || m) note("gMsg", `Saved. ${n ? `Shop This Look page${n > 1 ? "s" : ""} updated.` : ""} ${m ? "Storefront find updated." : ""}`.trim()); } catch {} } };
+    const ensureGarmentName = watchProductLink("gUrl", { nameId: "gName", brandId: "gBrand", msgId: "gMsg" });
+    $("gUpdate").onclick = async () => {
+      await ensureGarmentName();
+      const fields = readGarmentFields();
+      const { error } = await sb.from("garments").update(fields).eq("id", x.id);
+      note("gMsg", error ? error.message : "Saved.", !!error);
+      if (!error) { await loadAll(); try { const n = await syncShopPagesForGarment(x.id); const m = await syncProductForGarment(x.id); if (n || m) note("gMsg", `Saved. ${n ? `Shop This Look page${n > 1 ? "s" : ""} updated.` : ""} ${m ? "Storefront find updated." : ""}`.trim()); } catch {} }
+    };
     $("gStore").onclick = async () => { try { note("gMsg", "Updating storefront…"); if (productOf(x.id)?.published) { await unpublishProduct(x); note("gMsg", "Removed from the storefront."); } else { await publishProduct(x); note("gMsg", "Now on the storefront under Individual Finds."); } garmentSheet(x.id); } catch (e) { note("gMsg", e.message, true); } };
     if ($("gFav")) $("gFav").onclick = async () => { try { const pr = productOf(x.id); const { error } = await sb.from("shop_products").update({ featured: !pr.featured, updated_at: new Date().toISOString() }).eq("id", pr.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); garmentSheet(x.id); note("gMsg", pr.featured ? "Removed from My Favorites." : "Added to My Favorites."); } catch (e) { note("gMsg", e.message, true); } };
     $("gAdjust").onclick = async () => {
@@ -1253,7 +1396,20 @@ const ReelEngine = (() => {
         <a class="btn secondary" href="${esc(x.affiliate_url || "#")}" target="_blank" rel="noopener">Open on Amazon</a>
         <p class="kv">Amazon's rules don't allow storing or editing API product photos, so try-on, extraction and collages aren't available for this item. Import a screenshot of it instead if you need those.</p>
         <button class="btn danger" id="gDel">Delete</button><div id="gMsg" class="msg"></div></div>`);
-    $("gUpdate").onclick = async () => { const { error } = await sb.from("garments").update({ name: $("gName").value.trim(), brand: $("gBrand").value.trim(), category: $("gCat").value, notes: $("gNotes").value.trim() }).eq("id", x.id); note("gMsg", error ? error.message : "Saved.", !!error); if (!error) loadAll(); };
+    $("gUpdate").onclick = async () => {
+      if (needsProductName($("gName").value) && x.affiliate_url) {
+        note("gMsg", "Looking up name…");
+        const info = await lookupProductTitle(x.affiliate_url);
+        if (info && needsProductName($("gName").value)) {
+          const name = titledName(info);
+          if (name) $("gName").value = name;
+          if (!$("gBrand").value.trim() && info.brand) $("gBrand").value = info.brand;
+        } else if ($("gMsg") && $("gMsg").textContent.includes("Looking up name")) note("gMsg", "");
+      }
+      const { error } = await sb.from("garments").update({ name: $("gName").value.trim(), brand: $("gBrand").value.trim(), category: $("gCat").value, notes: $("gNotes").value.trim() }).eq("id", x.id);
+      note("gMsg", error ? error.message : "Saved.", !!error);
+      if (!error) loadAll();
+    };
     $("gRefresh").onclick = async () => { try { note("gMsg", "Refreshing…"); const r = await api("/amazon/refresh", { method: "POST", body: JSON.stringify({ garment_ids: [x.id] }) }); await loadAll(); apiGarmentSheet(garment(x.id)); note("gMsg", r.updated ? "Refreshed from Amazon." : "Amazon returned no data for this item (it may be unavailable).", !r.updated); } catch (e) { note("gMsg", e.message, true); } };
     $("gDel").onclick = async () => { if (!confirm(`Delete "${x.name}"?`)) return; await sb.from("garments").delete().eq("id", x.id); closeSheet(); await loadAll(); };
   }
@@ -2625,7 +2781,7 @@ const ReelEngine = (() => {
   // A look item's public photo is the cutout, otherwise the closet thumb, otherwise the main image. Putting the
   // item on a look is the permission to show that picture. public_ok is the clothing flag for the original photo;
   // it is set when the published file is the thumb or the main image, not when only a cutout is copied.
-  const PLACEHOLDER_NAME = /^(tops?|bottoms?|shoes?|accessor(y|ies)|dress(es)?|outerwear|bags?|jewel(le)?ry|item|one-pieces?|accessory)$/i;
+  const PLACEHOLDER_NAME = CATEGORY_NAME;
   const KNOWN_GARMENT_NAMES = {
     "b9323fe3-ae72-4919-a05e-f80eeef66c44": "Sundays Are for the Birds sweatshirt",
     "0b0daa8a-e981-4923-8f7a-54deb0ed228d": "Black half-snap stand-collar pullover",
@@ -2878,7 +3034,7 @@ const ReelEngine = (() => {
     if (error) throw new Error(error.message);
     await loadAll();
   }
-  async function addLookGarment(sp, gid, linkOverride) {
+  async function addLookGarment(sp, gid, linkOverride, onStatus) {
     const g = garment(gid); if (!g) throw new Error("That item is no longer in My Clothing.");
     const items = [...(sp.items || [])];
     if (items.some((it) => it.garment_id === gid)) throw new Error("Already on this look.");
@@ -2901,6 +3057,10 @@ const ReelEngine = (() => {
     } else if (saved && !g.affiliate_url) {
       use = { ...g, affiliate_url: saved.url, asin: saved.asin || g.asin || null };
     }
+    if (needsProductName(use.name) && (use.affiliate_url || use.product_url)) {
+      if (onStatus) onStatus("Looking up name…");
+      use = await fillGarmentName(use);
+    }
     items.push(await shopItemFromGarment(sp, use));
     await updateShopPage(sp, { items });
     await rememberOnOutfit(sp, gid);
@@ -2920,9 +3080,16 @@ const ReelEngine = (() => {
       await rememberOnOutfit(sp, match.id);
       return t.note ? `Added ${match.name}. ${t.note}` : `Added ${match.name}.`;
     }
-    const title = (name || "").trim();
+    let title = (name || "").trim();
+    let brand = "";
+    if (needsProductName(title)) {
+      const info = await lookupProductTitle(rawUrl);
+      const filled = info && titledName(info);
+      if (filled) title = filled;
+      if (info && info.brand) brand = info.brand;
+    }
     if (!title) throw new Error("Add a name so it shows on the look page.");
-    items.push({ manual: true, garment_id: null, name: shortName(title) || title, full_name: title, brand: "", url: t.url, hotspot: null, image_path: null });
+    items.push({ manual: true, garment_id: null, name: shortName(title) || title, full_name: title, brand, url: t.url, hotspot: null, image_path: null });
     await updateShopPage(sp, { items });
     return t.note ? `Added. ${t.note}` : "Added to the look page.";
   }
@@ -2982,7 +3149,7 @@ const ReelEngine = (() => {
       const cur = fresh(); if (!cur) return;
       if (btn) btn.disabled = true; note("liMsg", "Adding…");
       try {
-        const result = await addLookGarment(cur, gid);
+        const result = await addLookGarment(cur, gid, null, (t) => note("liMsg", t));
         if (result.needLink) { lookItemsSheet(id, { ask: gid }); return; }
         back(result.message);
       } catch (e) { if (btn) btn.disabled = false; note("liMsg", e.message, true); }
@@ -2992,14 +3159,15 @@ const ReelEngine = (() => {
     if ($("liItemAdd")) $("liItemAdd").onclick = async () => {
       const cur = fresh(); if (!cur || !ask) return;
       $("liItemAdd").disabled = true; note("liMsg", "Adding…");
-      try { const result = await addLookGarment(cur, ask.id, { url: $("liItemUrl").value, saveBack: $("liSaveBack").checked }); back(result.message); }
+      try { const result = await addLookGarment(cur, ask.id, { url: $("liItemUrl").value, saveBack: $("liSaveBack").checked }, (t) => note("liMsg", t)); back(result.message); }
       catch (e) { $("liItemAdd").disabled = false; note("liMsg", e.message, true); }
     };
     $("liUrl").oninput = () => { const t = tagAmazon($("liUrl").value, state.settings.amazon_tag); $("liNote").textContent = t.note || (state.settings.amazon_tag ? "Your tracking ID is added when the link doesn’t already have one." : "Set your Amazon tracking ID under Account to tag new links."); };
+    const ensureLiName = watchProductLink("liUrl", { nameId: "liName", msgId: "liMsg" });
     $("liAdd").onclick = async () => {
       const cur = fresh(); if (!cur) return;
       $("liAdd").disabled = true; note("liMsg", "Adding…");
-      try { const msg = await addLookLink(cur, $("liUrl").value, $("liName").value); back(msg); }
+      try { await ensureLiName(); const msg = await addLookLink(cur, $("liUrl").value, $("liName").value); back(msg); }
       catch (e) { $("liAdd").disabled = false; note("liMsg", e.message, true); }
     };
     $("liBack").onclick = () => { shopHomeSheet(); const card = $("sheetBody").querySelector(`[data-sp="${id}"]`); if (card) card.scrollIntoView({ block: "nearest" }); };
@@ -3019,7 +3187,7 @@ const ReelEngine = (() => {
         b.disabled = true; note("csMsg", "Adding…");
         try {
           const cur = state.shops.find((x) => x.id === spId);
-          const result = await addLookGarment(cur, b.dataset.add);
+          const result = await addLookGarment(cur, b.dataset.add, null, (t) => note("csMsg", t));
           if (result.needLink) { lookItemsSheet(spId, { ask: b.dataset.add }); return; }
           lookItemsSheet(spId); note("liMsg", result.message);
         } catch (e) { b.disabled = false; note("csMsg", e.message, true); }
@@ -4006,6 +4174,7 @@ const ReelEngine = (() => {
       <div><label>Amazon Storefront link (shown on your shopping homepage)</label><input type="url" id="setStore" value="${esc(s.amazon_storefront_url || "")}" placeholder="https://www.amazon.com/shop/yourname" inputmode="url" autocapitalize="none"></div>
       <button class="btn" id="setSave">Save settings</button>
       <button class="btn secondary" id="setRetag">Re-tag all saved Amazon links with this ID</button>
+      <button class="btn secondary" id="fillNamesAcct">Fill missing names</button>
       <h3>Password</h3>
       <div><label>New password (12+ characters)</label><input id="newpw" type="password" autocomplete="new-password" minlength="12"></div>
       <button class="btn secondary" id="changepw">Change password</button>
@@ -4024,11 +4193,12 @@ const ReelEngine = (() => {
       let n = 0; for (const g of state.garments) { const src = g.product_url || g.affiliate_url; if (!src) continue; const t = tagAmazon(src, tag); if (t.url !== g.affiliate_url) { await sb.from("garments").update({ affiliate_url: t.url, asin: t.asin || g.asin || null, product_url: src }).eq("id", g.id); n++; } }
       note("acctMsg", `${n} link${n === 1 ? "" : "s"} updated.`); loadAll();
     };
+    $("fillNamesAcct").onclick = () => fillMissingNames("acctMsg", $("fillNamesAcct"));
     $("changepw").onclick = async () => { const pw = $("newpw").value; if (pw.length < 12) { note("acctMsg", "12+ characters, please.", true); return; } const { error } = await sb.auth.updateUser({ password: pw }); note("acctMsg", error ? error.message : "Password changed.", !!error); };
     $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   });
   if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches, backfillShopPhotos, ensureLookItem };
+    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches, backfillShopPhotos, ensureLookItem, needsProductName, titledName, lookupProductTitle, fillGarmentName, fillMissingNames, watchProductLink, FILL_NAME_GAP_MS };
   }
 })();
 </script>

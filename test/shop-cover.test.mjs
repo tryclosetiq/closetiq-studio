@@ -142,7 +142,7 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     await stand.waitForSelector("a.topbtn");
     const homeBtn = await stand.$eval("a.topbtn", (a) => ({ text: a.textContent.trim(), href: a.getAttribute("href"), left: a.getBoundingClientRect().left, h: a.getBoundingClientRect().height }));
     assert.equal(homeBtn.text, "‹ Studio");
-    assert.match(homeBtn.href, /index\.html\?v=7$/);
+    assert.match(homeBtn.href, /index\.html\?v=8$/);
     assert.ok(homeBtn.left < 24);
     assert.ok(homeBtn.h >= 44);
     await mkdir("/opt/cursor/artifacts", { recursive: true });
@@ -160,13 +160,13 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     const bump = await browser.newPage();
     await bump.setRequestInterception(true);
     bump.on("request", (req) => {
-      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "8" }) });
+      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "9" }) });
       else req.continue();
     });
     await bump.goto(`http://127.0.0.1:${port}/shop.html?o=9jm0wt9qy6`, { waitUntil: "domcontentloaded" });
-    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "8" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
+    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "9" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
     await new Promise((r) => setTimeout(r, 400));
-    assert.equal(new URL(bump.url()).searchParams.get("v"), "8");
+    assert.equal(new URL(bump.url()).searchParams.get("v"), "9");
     await bump.close();
   } finally {
     await browser.close();
@@ -510,6 +510,129 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
       collage_public_path: "u/hyzzf1gkg9/custom.jpg",
     }));
     assert.equal(fromShop, "u/hyzzf1gkg9/custom.jpg");
+  } finally {
+    await browser.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("product title lookup fills a category name and leaves a typed name", async () => {
+  const server = await startServer();
+  const port = server.address().port;
+  const browser = await puppeteer.launch({
+    executablePath: "/usr/local/bin/google-chrome",
+    headless: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "networkidle0" });
+    await page.waitForFunction(() => window.__studio && window.__studio.titledName);
+    const names = await page.evaluate(() => {
+      const t = window.__studio.titledName;
+      const needs = window.__studio.needsProductName;
+      return {
+        prefixed: t({ short_title: "Ribbed long sleeve tee", brand: "EFAN" }),
+        already: t({ short_title: "EFAN Ribbed long sleeve tee", brand: "EFAN" }),
+        blank: needs(""),
+        tops: needs("Tops"),
+        shoes: needs("shoes"),
+        bags: needs("Bags"),
+        jewelry: needs("Jewelry"),
+        typed: needs("Black bird sweatshirt"),
+        gap: window.__studio.FILL_NAME_GAP_MS,
+      };
+    });
+    assert.equal(names.prefixed, "EFAN Ribbed long sleeve tee");
+    assert.equal(names.already, "EFAN Ribbed long sleeve tee");
+    assert.equal(names.blank, true);
+    assert.equal(names.tops, true);
+    assert.equal(names.shoes, true);
+    assert.equal(names.bags, true);
+    assert.equal(names.jewelry, true);
+    assert.equal(names.typed, false);
+    assert.equal(names.gap, 1500);
+
+    await page.evaluate(() => {
+      const s = window.__studio;
+      s.state.uid = "user-1";
+      s.state.garments = [
+        { id: "g-tops", name: "Tops", brand: "", asin: null, affiliate_url: "https://amzn.to/4birds", product_url: "https://amzn.to/4birds", category: "tops" },
+        { id: "g-typed", name: "Black bird sweatshirt", brand: "", asin: null, affiliate_url: "https://a.co/d/keepme", product_url: "https://a.co/d/keepme", category: "tops" },
+        { id: "g-blocked", name: "Shoes", brand: "Old", asin: "B0KEEPASIN", affiliate_url: "https://link.amazon/B0blocked1", product_url: "", category: "shoes" },
+      ];
+      s.shopCalls = [];
+      const orig = window.fetch.bind(window);
+      window.fetch = async (url, opts) => {
+        if (String(url).includes("/functions/v1/product-title")) {
+          const body = JSON.parse(opts.body);
+          const link = body.url || "";
+          if (link.includes("blocked")) return new Response(JSON.stringify({ asin: "B0BLOCKED1", short_title: "", brand: "", blocked: true }), { status: 200, headers: { "content-type": "application/json" } });
+          if (link.includes("amzn.to")) return new Response(JSON.stringify({ asin: "B08MPMAKT", short_title: "Sundays Are for the Birds sweatshirt", brand: "Lucky Brand", title: "Lucky Brand Sundays Are for the Birds sweatshirt", final_url: "https://www.amazon.com/dp/B08MPMAKT" }), { status: 200, headers: { "content-type": "application/json" } });
+          return new Response(JSON.stringify({ error: "no_asin" }), { status: 400, headers: { "content-type": "application/json" } });
+        }
+        return orig(url, opts);
+      };
+      s.sb.auth.getSession = async () => ({ data: { session: { access_token: "test-token" } } });
+      const sb = s.sb;
+      sb.from = (table) => {
+        const q = {
+          select() { return q; }, order() { return q; }, range() { return q; },
+          update(patch) { q._patch = patch; return q; },
+          eq(col, val) {
+            if (col === "id" && q._patch && table === "garments") {
+              const row = s.state.garments.find((g) => g.id === val);
+              if (row) Object.assign(row, q._patch);
+              s.shopCalls.push({ op: "update", table, id: val, patch: { ...q._patch } });
+            }
+            return q;
+          },
+          then(resolve, reject) {
+            const data = table === "garments" ? s.state.garments : [];
+            return Promise.resolve({ data, error: null }).then(resolve, reject);
+          },
+        };
+        return q;
+      };
+    });
+
+    const filled = await page.evaluate(async () => {
+      const s = window.__studio;
+      const tops = await s.fillGarmentName(s.state.garments[0]);
+      const typed = await s.fillGarmentName(s.state.garments[1]);
+      const blocked = await s.fillGarmentName(s.state.garments[2]);
+      document.body.insertAdjacentHTML("beforeend", `<input id="tUrl" value="https://amzlinks.in/abc"><input id="tName" value="Accessories"><input id="tBrand" value=""><div id="tMsg" class="msg"></div>`);
+      const ensure = s.watchProductLink("tUrl", { nameId: "tName", brandId: "tBrand", msgId: "tMsg" });
+      document.getElementById("tUrl").dispatchEvent(new Event("blur"));
+      await ensure();
+      document.getElementById("tName").value = "My typed name";
+      document.getElementById("tUrl").value = "https://amzn.to/4birds";
+      document.getElementById("tUrl").dispatchEvent(new Event("paste"));
+      await new Promise((r) => setTimeout(r, 50));
+      await ensure();
+      return {
+        tops: tops.name,
+        topsBrand: tops.brand,
+        topsAsin: tops.asin,
+        typed: typed.name,
+        blocked: blocked.name,
+        blockedAsin: blocked.asin,
+        blockedBrand: blocked.brand,
+        field: document.getElementById("tName").value,
+        sentAuth: true,
+      };
+    });
+    assert.equal(filled.tops, "Lucky Brand Sundays Are for the Birds sweatshirt");
+    assert.equal(filled.topsBrand, "Lucky Brand");
+    assert.equal(filled.topsAsin, "B08MPMAKT");
+    assert.equal(filled.typed, "Black bird sweatshirt");
+    assert.equal(filled.blocked, "Shoes");
+    assert.equal(filled.blockedAsin, "B0KEEPASIN");
+    assert.equal(filled.blockedBrand, "Old");
+    assert.equal(filled.field, "My typed name");
+
+    const calls = await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.table === "garments").map((c) => c.id));
+    assert.deepEqual(calls, ["g-tops"]);
   } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));

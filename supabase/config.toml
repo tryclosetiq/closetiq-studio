@@ -4,3 +4,7 @@ project_id = "yjjdzugecimjwgwtkwyw"
 
 [functions.flux-vto]
 verify_jwt = true
+
+# Already deployed. Studio calls it with the signed-in user's access token.
+[functions.product-title]
+verify_jwt = true
