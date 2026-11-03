@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#f5efe6">
 <title>ClosetIQ Studio</title>
 <script>
-window.BUILD = "8";
+window.BUILD = "9";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   async function checkBuild() {
@@ -375,7 +375,7 @@ window.BUILD = "8";
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=8"></script>
+<script src="shop-cover.js?v=9"></script>
 <script>
 // Decorative collage backgrounds — original procedural SVG, no external assets.
 // Each design renders at any W×H with normalized placement, so the on-screen stage, the saved
@@ -3267,9 +3267,29 @@ const ReelEngine = (() => {
   }
   // Point the look page (collage_public_path) and the homepage tile (cover_public_path) at the same file,
   // so both show the picture she just chose. custom.jpg is the existing flag for an owner image.
+  // When the look is tied to a collage, the Collages tab tile gets the same picture as a new imported image.
+  async function syncCollageToCover(sp, jpeg) {
+    if (!sp?.collage_id) return;
+    const c = state.collages.find((x) => x.id === sp.collage_id);
+    const path = `${state.uid}/collages/${sp.collage_id}_${Date.now()}.jpg`;
+    await upload(path, jpeg);
+    const items = (sp.items || []).map((it) => it && it.garment_id).filter(Boolean);
+    const layout = {
+      v: 2, mode: "clothing", size: "portrait", bg: "#ffffff",
+      imported: true, image: path, mime: "image/jpeg", layers: [], items,
+      previous: c?.layout ? JSON.parse(JSON.stringify(c.layout)) : null,
+    };
+    const patch = { preview_path: path, layout, updated_at: new Date().toISOString() };
+    let { error } = await sb.from("collages").update(patch).eq("id", sp.collage_id).eq("user_id", state.uid);
+    if (error) ({ error } = await sb.from("collages").update(patch).eq("id", sp.collage_id));
+    if (error) throw new Error(error.message);
+    if (c) { c.preview_path = path; c.layout = layout; c.updated_at = patch.updated_at; }
+  }
   async function saveLookCover(sp, blob) {
+    const jpeg = await jpegCover(blob);
+    if (sp.collage_id) await syncCollageToCover(sp, jpeg);
     const path = `${state.uid}/${sp.slug}/custom.jpg`;
-    await uploadPublic(path, await jpegCover(blob));
+    await uploadPublic(path, jpeg);
     try { await updateShopPage(sp, { collage_public_path: path, cover_public_path: path }); }
     catch (e) { if (!/cover_public_path/.test(e.message)) throw e; await updateShopPage(sp, { collage_public_path: path }); }
   }
@@ -3362,7 +3382,7 @@ const ReelEngine = (() => {
     const done = (msg) => { shopHomeSheet(); const card = $("sheetBody").querySelector(`[data-sp="${sp.id}"]`); if (card) card.scrollIntoView({ block: "nearest" }); note("shhMsg", msg); };
     const useBlob = async (blob) => {
       if (saving) return; saving = true; note("cpMsg", "Saving…");
-      try { await saveLookCover(sp, blob); done("Photo updated. The storefront tile and the look page use it now."); }
+      try { await saveLookCover(sp, blob); done(sp.collage_id ? "Photo updated. The storefront and the Collages tile use it now." : "Photo updated. The storefront tile and the look page use it now."); }
       catch (e) { saving = false; note("cpMsg", e.message, true); if ($("cpFile")) $("cpFile").value = ""; }
     };
     const adjustThenSave = async (blob) => {

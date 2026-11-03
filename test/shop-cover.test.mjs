@@ -142,7 +142,7 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     await stand.waitForSelector("a.topbtn");
     const homeBtn = await stand.$eval("a.topbtn", (a) => ({ text: a.textContent.trim(), href: a.getAttribute("href"), left: a.getBoundingClientRect().left, h: a.getBoundingClientRect().height }));
     assert.equal(homeBtn.text, "‹ Studio");
-    assert.match(homeBtn.href, /index\.html\?v=8$/);
+    assert.match(homeBtn.href, /index\.html\?v=9$/);
     assert.ok(homeBtn.left < 24);
     assert.ok(homeBtn.h >= 44);
     await mkdir("/opt/cursor/artifacts", { recursive: true });
@@ -160,13 +160,13 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     const bump = await browser.newPage();
     await bump.setRequestInterception(true);
     bump.on("request", (req) => {
-      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "9" }) });
+      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "10" }) });
       else req.continue();
     });
     await bump.goto(`http://127.0.0.1:${port}/shop.html?o=9jm0wt9qy6`, { waitUntil: "domcontentloaded" });
-    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "9" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
+    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "10" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
     await new Promise((r) => setTimeout(r, 400));
-    assert.equal(new URL(bump.url()).searchParams.get("v"), "9");
+    assert.equal(new URL(bump.url()).searchParams.get("v"), "10");
     await bump.close();
   } finally {
     await browser.close();
@@ -288,6 +288,11 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
               if (row) Object.assign(row, q._patch);
               window.__studio.shopCalls.push({ op: "update", table, id: val, patch: { ...q._patch } });
             }
+            if (col === "id" && q._patch && table === "collages") {
+              const row = window.__studio.state.collages.find((c) => c.id === val);
+              if (row) Object.assign(row, q._patch);
+              window.__studio.shopCalls.push({ op: "update", table, id: val, patch: { ...q._patch } });
+            }
             return q;
           },
           maybeSingle() { q._one = true; return q; },
@@ -383,9 +388,21 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
     assert.equal(upload.path, "user-1/hyzzf1gkg9/custom.jpg");
     assert.equal(upload.type, "image/jpeg");
     assert.equal(upload.upsert, true);
-    const patch = saved.filter((c) => c.op === "update").at(-1).patch;
+    const patch = saved.filter((c) => c.op === "update" && c.table === "shop_pages").at(-1).patch;
     assert.equal(patch.collage_public_path, "user-1/hyzzf1gkg9/custom.jpg");
     assert.equal(patch.cover_public_path, "user-1/hyzzf1gkg9/custom.jpg");
+    const collageSync = saved.find((c) => c.op === "update" && c.table === "collages" && c.id === "c-olive");
+    assert.ok(collageSync);
+    assert.match(collageSync.patch.preview_path, /^user-1\/collages\/c-olive_\d+\.jpg$/);
+    assert.equal(collageSync.patch.layout.imported, true);
+    assert.equal(collageSync.patch.layout.image, collageSync.patch.preview_path);
+    assert.equal(collageSync.patch.layout.mime, "image/jpeg");
+    assert.deepEqual(collageSync.patch.layout.layers, []);
+    assert.deepEqual(collageSync.patch.layout.items, ["g-old", "b9323fe3-ae72-4919-a05e-f80eeef66c44", "0b0daa8a-e981-4923-8f7a-54deb0ed228d"]);
+    assert.deepEqual(collageSync.patch.layout.previous, { size: "portrait", bg: "#d7d2c8", layers: [] });
+    const collageFile = saved.find((c) => c.op === "upload" && c.path === collageSync.patch.preview_path);
+    assert.ok(collageFile);
+    assert.equal(collageFile.type, "image/jpeg");
     assert.equal(await chips("olive").then((c) => c.custom), true);
     await page.waitForFunction(() => {
       const img = document.querySelector('[data-sp="olive"] .tile img');

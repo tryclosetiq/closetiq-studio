@@ -15,7 +15,7 @@
 <meta property="og:type" content="website">
 <title>Shop This Outfit</title>
 <script>
-window.BUILD = "8";
+window.BUILD = "9";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   async function checkBuild() {
@@ -89,7 +89,7 @@ window.BUILD = "8";
 <body>
 <div class="wrap" id="page"><div class="empty">Loading…</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=8"></script>
+<script src="shop-cover.js?v=9"></script>
 <script>
 (async () => {
   // Public page: reads ONLY published snapshots via the anon key (RLS: published = true). No login, no private data.
@@ -103,7 +103,7 @@ window.BUILD = "8";
   const ok = (u) => isShopLink(u);
   const home = location.pathname.split("/").pop() || "shop.html";
   // A plain link, never history.back: standalone home-screen mode has no browser back button.
-  const studioHref = new URL("index.html?v=" + encodeURIComponent(window.BUILD || "8"), location.href).href;
+  const studioHref = new URL("index.html?v=" + encodeURIComponent(window.BUILD || "9"), location.href).href;
   const fromStudio = qs.get("from") === "studio", embed = qs.get("embed") === "1";
   let owner = false;
   try { const { data } = await sb.auth.getSession(); owner = !!data.session?.user; } catch {}
