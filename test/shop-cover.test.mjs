@@ -85,8 +85,8 @@ test("tile image matches the public storefront, including custom.jpg with an emp
 test("the editor and the public shop share one tile rule and offer Change photo", () => {
   const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const shop = readFileSync(new URL("../shop.html", import.meta.url), "utf8");
-  assert.match(index, /src="shop-cover\.js"/);
-  assert.match(shop, /src="shop-cover\.js"/);
+  assert.match(index, /src="shop-cover\.js\?v=/);
+  assert.match(shop, /src="shop-cover\.js\?v=/);
   assert.match(shop, /shopTilePath\(r\)/);
   assert.doesNotMatch(shop, /const tilePath/);
   assert.match(index, /shopTilePath\(p\)/);
@@ -113,6 +113,66 @@ function startServer() {
   });
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
+
+test("home-screen storefront shows Studio and reloads when the build changes", async () => {
+  const server = await startServer();
+  const port = server.address().port;
+  const browser = await puppeteer.launch({
+    executablePath: "/usr/local/bin/google-chrome",
+    headless: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    await page.goto(`http://127.0.0.1:${port}/shop.html`, { waitUntil: "networkidle0" });
+    await page.waitForFunction(() => document.querySelector("h1"));
+    assert.equal(await page.$(".shop-top"), null);
+
+    const stand = await browser.newPage();
+    await stand.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    await stand.evaluateOnNewDocument(() => {
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = (q) => String(q).includes("display-mode: standalone")
+        ? { matches: true, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } }
+        : real(q);
+      try { Object.defineProperty(navigator, "standalone", { configurable: true, get: () => true }); } catch {}
+    });
+    await stand.goto(`http://127.0.0.1:${port}/shop.html`, { waitUntil: "networkidle0" });
+    await stand.waitForSelector("a.topbtn");
+    const homeBtn = await stand.$eval("a.topbtn", (a) => ({ text: a.textContent.trim(), href: a.getAttribute("href"), left: a.getBoundingClientRect().left, h: a.getBoundingClientRect().height }));
+    assert.equal(homeBtn.text, "‹ Studio");
+    assert.match(homeBtn.href, /index\.html\?v=6$/);
+    assert.ok(homeBtn.left < 24);
+    assert.ok(homeBtn.h >= 44);
+    await mkdir("/opt/cursor/artifacts", { recursive: true });
+    await stand.screenshot({ path: "/opt/cursor/artifacts/shop-standalone-home.png" });
+
+    await stand.goto(`http://127.0.0.1:${port}/shop.html?o=9jm0wt9qy6`, { waitUntil: "networkidle0" });
+    await stand.waitForSelector("a.topbtn");
+    const lookBtns = await stand.$$eval("a.topbtn", (els) => els.map((a) => ({ text: a.textContent.trim(), left: Math.round(a.getBoundingClientRect().left) })));
+    assert.equal(lookBtns[0].text, "‹ All looks");
+    assert.ok(lookBtns[0].left < 24);
+    assert.equal(lookBtns.some((b) => b.text === "‹ Studio"), true);
+    await stand.screenshot({ path: "/opt/cursor/artifacts/shop-standalone-look.png" });
+    await stand.close();
+
+    const bump = await browser.newPage();
+    await bump.setRequestInterception(true);
+    bump.on("request", (req) => {
+      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "7" }) });
+      else req.continue();
+    });
+    await bump.goto(`http://127.0.0.1:${port}/shop.html?o=9jm0wt9qy6`, { waitUntil: "domcontentloaded" });
+    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "7" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(new URL(bump.url()).searchParams.get("v"), "7");
+    await bump.close();
+  } finally {
+    await browser.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
 
 test("storefront editor on a phone shows the live cover and can change it", async () => {
   const server = await startServer();

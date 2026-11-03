@@ -6,9 +6,33 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Studio">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="apple-touch-icon.png">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#f5efe6">
 <title>ClosetIQ Studio</title>
+<script>
+window.BUILD = "6";
+(function () {
+  window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  async function checkBuild() {
+    try {
+      const base = location.pathname.replace(/[^/]*$/, "");
+      const res = await fetch(location.origin + base + "version.json?t=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) return;
+      const remote = String((await res.json()).version || "");
+      if (!remote || remote === window.BUILD) { try { sessionStorage.removeItem("closetiq-build"); } catch {} return; }
+      try { if (sessionStorage.getItem("closetiq-build") === remote) return; sessionStorage.setItem("closetiq-build", remote); } catch {}
+      const params = new URLSearchParams(location.search);
+      if (params.get("v") === remote) return;
+      params.set("v", remote);
+      location.replace(location.pathname + "?" + params.toString() + location.hash);
+    } catch {}
+  }
+  checkBuild();
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkBuild(); });
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter+Tight:wght@400;500;600;700&display=swap">
 <style>
@@ -349,7 +373,7 @@
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=5"></script>
+<script src="shop-cover.js?v=6"></script>
 <script>
 // Decorative collage backgrounds — original procedural SVG, no external assets.
 // Each design renders at any W×H with normalized placement, so the on-screen stage, the saved

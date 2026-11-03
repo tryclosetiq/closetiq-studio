@@ -3,11 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Shop">
 <meta name="theme-color" content="#f5efe6">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="apple-touch-icon.png">
 <meta property="og:title" content="Shop this outfit · ClosetIQ Studio">
 <meta property="og:description" content="Every piece in this look, with links.">
 <meta property="og:type" content="website">
 <title>Shop This Outfit</title>
+<script>
+window.BUILD = "6";
+(function () {
+  window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  async function checkBuild() {
+    try {
+      const base = location.pathname.replace(/[^/]*$/, "");
+      const res = await fetch(location.origin + base + "version.json?t=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) return;
+      const remote = String((await res.json()).version || "");
+      if (!remote || remote === window.BUILD) { try { sessionStorage.removeItem("closetiq-build"); } catch {} return; }
+      try { if (sessionStorage.getItem("closetiq-build") === remote) return; sessionStorage.setItem("closetiq-build", remote); } catch {}
+      const params = new URLSearchParams(location.search);
+      if (params.get("v") === remote) return;
+      params.set("v", remote);
+      location.replace(location.pathname + "?" + params.toString() + location.hash);
+    } catch {}
+  }
+  checkBuild();
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkBuild(); });
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter+Tight:wght@400;500;600&display=swap">
 <style>
@@ -61,7 +89,7 @@
 <body>
 <div class="wrap" id="page"><div class="empty">Loading…</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=5"></script>
+<script src="shop-cover.js?v=6"></script>
 <script>
 (async () => {
   // Public page: reads ONLY published snapshots via the anon key (RLS: published = true). No login, no private data.
@@ -75,13 +103,15 @@
   const ok = (u) => isShopLink(u);
   const home = location.pathname.split("/").pop() || "shop.html";
   // A plain link, never history.back: standalone home-screen mode has no browser back button.
-  const studioHref = location.href.replace(/shop\.html.*$/, "") || "./";
+  const studioHref = new URL("index.html?v=" + encodeURIComponent(window.BUILD || "6"), location.href).href;
   const fromStudio = qs.get("from") === "studio", embed = qs.get("embed") === "1";
   let owner = false;
   try { const { data } = await sb.auth.getSession(); owner = !!data.session?.user; } catch {}
   // Public shoppers never see Studio. The signed-in owner does, including from the home-screen app.
   // Inside the Studio preview frame the parent already has Back to Studio.
-  const showStudio = owner && !embed;
+  // Standalone (iPhone home screen) has its own storage, so the Studio sign-in is not here.
+  // Still show ‹ Studio; index.html asks her to sign in. Ordinary browser shoppers stay without it.
+  const showStudio = !embed && (owner || window.__standalone);
   const withParams = (extra) => {
     const p = new URLSearchParams();
     if (fromStudio) p.set("from", "studio");
