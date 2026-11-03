@@ -15,22 +15,25 @@
 <meta property="og:type" content="website">
 <title>Shop This Outfit</title>
 <script>
-window.BUILD = "9";
+window.BUILD = "10";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  var buildReload = false;
   async function checkBuild() {
     try {
+      if (buildReload) return;
       const base = location.pathname.replace(/[^/]*$/, "");
       const res = await fetch(location.origin + base + "version.json?t=" + Date.now(), { cache: "no-store" });
       if (!res.ok) return;
       const remote = String((await res.json()).version || "");
-      if (!remote || remote === window.BUILD) { try { sessionStorage.removeItem("closetiq-build"); } catch {} return; }
-      try { if (sessionStorage.getItem("closetiq-build") === remote) return; sessionStorage.setItem("closetiq-build", remote); } catch {}
+      if (!remote || remote === String(window.BUILD)) { try { sessionStorage.removeItem("closetiq-build"); } catch (e) {} return; }
+      try { if (sessionStorage.getItem("closetiq-build") === remote) return; sessionStorage.setItem("closetiq-build", remote); } catch (e) {}
       const params = new URLSearchParams(location.search);
       if (params.get("v") === remote) return;
+      buildReload = true;
       params.set("v", remote);
       location.replace(location.pathname + "?" + params.toString() + location.hash);
-    } catch {}
+    } catch (e) {}
   }
   checkBuild();
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkBuild(); });
@@ -89,7 +92,7 @@ window.BUILD = "9";
 <body>
 <div class="wrap" id="page"><div class="empty">Loading…</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=9"></script>
+<script src="shop-cover.js?v=10"></script>
 <script>
 (async () => {
   // Public page: reads ONLY published snapshots via the anon key (RLS: published = true). No login, no private data.
@@ -103,7 +106,7 @@ window.BUILD = "9";
   const ok = (u) => isShopLink(u);
   const home = location.pathname.split("/").pop() || "shop.html";
   // A plain link, never history.back: standalone home-screen mode has no browser back button.
-  const studioHref = new URL("index.html?v=" + encodeURIComponent(window.BUILD || "9"), location.href).href;
+  const studioHref = new URL("index.html?v=" + encodeURIComponent(window.BUILD || "10"), location.href).href;
   const fromStudio = qs.get("from") === "studio", embed = qs.get("embed") === "1";
   let owner = false;
   try { const { data } = await sb.auth.getSession(); owner = !!data.session?.user; } catch {}

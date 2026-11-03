@@ -142,7 +142,7 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     await stand.waitForSelector("a.topbtn");
     const homeBtn = await stand.$eval("a.topbtn", (a) => ({ text: a.textContent.trim(), href: a.getAttribute("href"), left: a.getBoundingClientRect().left, h: a.getBoundingClientRect().height }));
     assert.equal(homeBtn.text, "‹ Studio");
-    assert.match(homeBtn.href, /index\.html\?v=9$/);
+    assert.match(homeBtn.href, /index\.html\?v=10$/);
     assert.ok(homeBtn.left < 24);
     assert.ok(homeBtn.h >= 44);
     await mkdir("/opt/cursor/artifacts", { recursive: true });
@@ -160,13 +160,13 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     const bump = await browser.newPage();
     await bump.setRequestInterception(true);
     bump.on("request", (req) => {
-      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "10" }) });
+      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "11" }) });
       else req.continue();
     });
     await bump.goto(`http://127.0.0.1:${port}/shop.html?o=9jm0wt9qy6`, { waitUntil: "domcontentloaded" });
-    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "10" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
+    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "11" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
     await new Promise((r) => setTimeout(r, 400));
-    assert.equal(new URL(bump.url()).searchParams.get("v"), "10");
+    assert.equal(new URL(bump.url()).searchParams.get("v"), "11");
     await bump.close();
   } finally {
     await browser.close();
@@ -650,6 +650,57 @@ test("product title lookup fills a category name and leaves a typed name", async
 
     const calls = await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.table === "garments").map((c) => c.id));
     assert.deepEqual(calls, ["g-tops"]);
+  } finally {
+    await browser.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("back closes a Studio sheet in place and a saved session hides the login screen", async () => {
+  const server = await startServer();
+  const port = server.address().port;
+  const browser = await puppeteer.launch({
+    executablePath: "/usr/local/bin/google-chrome",
+    headless: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    await page.evaluateOnNewDocument(() => {
+      localStorage.setItem("sb-yjjdzugecimjwgwtkwyw-auth-token", JSON.stringify({
+        access_token: "test-token", refresh_token: "refresh", token_type: "bearer",
+        expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: "user-1" },
+      }));
+    });
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+    const firstPaint = await page.evaluate(() => ({
+      session: document.documentElement.classList.contains("has-session"),
+      login: getComputedStyle(document.getElementById("login")).display,
+    }));
+    assert.equal(firstPaint.session, true);
+    assert.equal(firstPaint.login, "none");
+
+    await page.waitForFunction(() => window.__studio);
+    const before = page.url();
+    await page.evaluate(() => window.__studio.showTab("clothing"));
+    assert.equal(await page.$eval(".tab.on", (el) => el.dataset.tab), "clothing");
+    await page.goBack();
+    assert.equal(page.url(), before);
+    assert.equal(await page.$eval(".tab.on", (el) => el.dataset.tab), "models");
+
+    await page.evaluate(() => {
+      window.__studio.state.me = { email: "heather@example.com", daily_cap: 20, tz: "America/Chicago", presets: {}, actions: {} };
+      window.__studio.state.settings = {};
+      window.__stay = 1;
+      document.getElementById("title").click();
+    });
+    await page.waitForSelector("#sheet.open");
+    await page.goBack();
+    await page.waitForFunction(() => !document.getElementById("sheet").classList.contains("open"));
+    assert.equal(page.url(), before);
+    assert.equal(await page.evaluate(() => window.__stay), 1);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById("login")).display), "none");
   } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));

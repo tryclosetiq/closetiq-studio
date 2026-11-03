@@ -12,22 +12,34 @@
 <meta name="theme-color" content="#f5efe6">
 <title>ClosetIQ Studio</title>
 <script>
-window.BUILD = "9";
+window.BUILD = "10";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var key = localStorage.key(i) || "";
+      if (key.indexOf("sb-") !== 0 || key.indexOf("auth-token") === -1) continue;
+      var saved = JSON.parse(localStorage.getItem(key) || "null");
+      var token = saved && (saved.access_token || (saved.currentSession && saved.currentSession.access_token));
+      if (token) { document.documentElement.classList.add("has-session"); break; }
+    }
+  } catch (e) {}
+  var buildReload = false;
   async function checkBuild() {
     try {
+      if (buildReload) return;
       const base = location.pathname.replace(/[^/]*$/, "");
       const res = await fetch(location.origin + base + "version.json?t=" + Date.now(), { cache: "no-store" });
       if (!res.ok) return;
       const remote = String((await res.json()).version || "");
-      if (!remote || remote === window.BUILD) { try { sessionStorage.removeItem("closetiq-build"); } catch {} return; }
-      try { if (sessionStorage.getItem("closetiq-build") === remote) return; sessionStorage.setItem("closetiq-build", remote); } catch {}
+      if (!remote || remote === String(window.BUILD)) { try { sessionStorage.removeItem("closetiq-build"); } catch (e) {} return; }
+      try { if (sessionStorage.getItem("closetiq-build") === remote) return; sessionStorage.setItem("closetiq-build", remote); } catch (e) {}
       const params = new URLSearchParams(location.search);
       if (params.get("v") === remote) return;
+      buildReload = true;
       params.set("v", remote);
       location.replace(location.pathname + "?" + params.toString() + location.hash);
-    } catch {}
+    } catch (e) {}
   }
   checkBuild();
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkBuild(); });
@@ -120,6 +132,9 @@ window.BUILD = "9";
   .kv{font-size:13px;color:var(--muted)}
   .links a{color:var(--accent);word-break:break-all}
   .hidden{display:none !important}
+  html.has-session #login{display:none !important}
+  html.has-session #app{display:block !important}
+  html.has-session #nav{display:flex !important}
   .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;vertical-align:-3px}
   @media (prefers-reduced-motion:no-preference){.spinner{animation:spin .9s linear infinite}}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -375,7 +390,7 @@ window.BUILD = "9";
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=9"></script>
+<script src="shop-cover.js?v=10"></script>
 <script>
 // Decorative collage backgrounds — original procedural SVG, no external assets.
 // Each design renders at any W×H with normalized placement, so the on-screen stage, the saved
@@ -754,8 +769,20 @@ const ReelEngine = (() => {
     const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
     if (error) $("loginMsg").textContent = error.message; else boot();
   });
-  sb.auth.getSession().then(({ data }) => { if (data.session) boot(); });
+  sb.auth.getSession().then(({ data }) => { if (data.session) boot(); else showLogin(); });
 
+  function showLogin(message) {
+    document.documentElement.classList.remove("has-session");
+    $("login").classList.remove("hidden");
+    $("app").classList.add("hidden");
+    $("nav").classList.add("hidden");
+    if (message) $("loginMsg").textContent = message;
+  }
+  function showApp() {
+    $("login").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    $("nav").classList.remove("hidden");
+  }
   async function boot() {
     try {
       state.me = await api("/me"); state.uid = state.me.user_id;
@@ -763,12 +790,16 @@ const ReelEngine = (() => {
       $("preset").innerHTML = Object.entries(state.me.presets).map(([k, p]) =>
         `<option value="${k}" ${k === "max_balanced_1k" ? "selected" : ""}>${esc(p.label)} · ${p.credits} credit${p.credits > 1 ? "s" : ""}</option>`).join("");
       togglePresetOpts();
-      $("login").classList.add("hidden"); $("app").classList.remove("hidden"); $("nav").classList.remove("hidden");
+      showApp();
       await probeFlux();
       await loadAll();
       backfillShopPhotos().catch((e) => console.warn("shop photos", e));
       api("/credits").then((c) => setUsage(state.me.used_today, state.me.daily_cap, c.credits.total)).catch(() => {});
-    } catch (e) { $("loginMsg").textContent = e.message; await sb.auth.signOut(); }
+    } catch (e) {
+      const msg = e && e.message ? e.message : "";
+      if (/401|jwt|unauthorized|signed out|sign in required/i.test(msg)) { await sb.auth.signOut(); showLogin(msg); }
+      else showApp();
+    }
   }
   function setUsage(used, cap, bal) { state.me.used_today = used; $("usage").textContent = `${used}/${cap} today` + (bal != null ? ` · ${bal} left` : ""); }
   const cost = (k) => state.me.actions[k];
@@ -1032,16 +1063,63 @@ const ReelEngine = (() => {
   function note(id, text, err) { const el = $(id); if (!el) return; el.innerHTML = (text && !err && /…/.test(text) ? '<span class="spinner"></span> ' : "") + esc(text); el.className = "msg " + (err ? "err" : "ok"); }
 
   // ------------------------------------------------------------------ sheets + tabs
-  function openSheet(html) { $("sheetBody").innerHTML = html; $("sheet").classList.add("open"); $("sheetBg").classList.add("open"); $("sheet").scrollTop = 0; fillImgs($("sheetBody")); }
-  function closeSheet() { $("sheet").classList.remove("open"); $("sheetBg").classList.remove("open"); $("sheetBody").innerHTML = ""; }
+  // Browser Back, the iOS edge swipe, and the in-app close buttons stay on this page.
+  // A full navigation is what was flashing the sign-in screen.
+  let historyGuard = false;
+  const currentTab = () => (document.querySelector(".tab.on") || {}).dataset?.tab || "models";
+  function pushView(kind) {
+    if (historyGuard) return;
+    const entry = { closetiq: 1, kind, tab: currentTab() };
+    const cur = history.state;
+    if (cur && cur.closetiq && cur.kind === entry.kind && cur.tab === entry.tab) return;
+    history.pushState(entry, "");
+  }
+  function releaseView(kind) {
+    if (historyGuard) return;
+    if (!history.state || history.state.kind !== kind) return;
+    history.replaceState({ closetiq: 1, kind: "tab", tab: history.state.tab || currentTab() }, "");
+  }
+  function hideSheetDom() { $("sheet").classList.remove("open"); $("sheetBg").classList.remove("open"); $("sheetBody").innerHTML = ""; }
+  function hideAdjusterDom() { $("adjuster").classList.add("hidden"); if ($("editor").classList.contains("hidden") && $("importer").classList.contains("hidden")) document.body.style.overflow = ""; }
+  function hidePreviewDom() { $("shopPreview").classList.add("hidden"); $("spvFrame").src = "about:blank"; }
+  function hideEditorDom() {
+    $("editor").classList.add("hidden"); $("editor").classList.remove("imported"); $("edFixed").classList.add("hidden");
+    stage.querySelectorAll("img.fixed").forEach((e) => e.remove()); document.body.style.overflow = ""; ed.c = null;
+  }
+  function hideImporterDom() { $("importer").classList.add("hidden"); $("iwBody").innerHTML = ""; document.body.style.overflow = $("editor").classList.contains("hidden") ? "" : "hidden"; }
+  function applyHistoryState(state) {
+    const kind = state && state.closetiq ? state.kind : "tab";
+    if (kind !== "adjuster") hideAdjusterDom();
+    if (kind !== "importer") hideImporterDom();
+    if (kind !== "preview") hidePreviewDom();
+    if (kind !== "sheet") hideSheetDom();
+    if (kind !== "editor") {
+      if (!$("editor").classList.contains("hidden") && ed.dirty && !confirm("Leave without saving? Unsaved changes will be lost.")) {
+        history.pushState({ closetiq: 1, kind: "editor", tab: currentTab() }, "");
+        return;
+      }
+      if (!$("editor").classList.contains("hidden")) { ed.dirty = false; hideEditorDom(); }
+    }
+    if (state && state.tab) showTab(state.tab, true);
+  }
+  window.addEventListener("popstate", () => {
+    historyGuard = true;
+    try { applyHistoryState(history.state); }
+    finally { historyGuard = false; }
+  });
+  function openSheet(html) { const opened = $("sheet").classList.contains("open"); $("sheetBody").innerHTML = html; $("sheet").classList.add("open"); $("sheetBg").classList.add("open"); $("sheet").scrollTop = 0; fillImgs($("sheetBody")); if (!opened) pushView("sheet"); }
+  function closeSheet() { hideSheetDom(); releaseView("sheet"); }
   $("sheetBg").addEventListener("click", closeSheet);
   document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
-  function showTab(t) {
+  function showTab(t, fromHistory) {
+    const prev = currentTab();
+    if (!fromHistory && !historyGuard && $("sheet").classList.contains("open")) { hideSheetDom(); releaseView("sheet"); }
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
     ["models", "clothing", "tryon", "discover", "collages", "photos", "outfits", "reels", "store"].forEach((k) => $("tab-" + k).classList.toggle("hidden", k !== t));
     window.scrollTo(0, 0);
     if (t === "discover") loadDiscoverStatus();
     if (t === "reels") renderReelsTab(); else stopReelPreview();
+    if (!fromHistory && !historyGuard && prev !== t) pushView("tab");
   }
   // Amazon-API products: live image link from Amazon (never copied), no cutout/try-on/collage use.
   const isApi = (g) => !!g && g.source === "amazon_api";
@@ -1237,7 +1315,7 @@ const ReelEngine = (() => {
 
   // Import wizard (full-screen on iPhone): frame the product → optional AI extraction with preview → details → save.
   // The crop frame is measured against the DISPLAYED image, so the saved crop always matches what you see.
-  function closeImporter() { $("importer").classList.add("hidden"); $("iwBody").innerHTML = ""; document.body.style.overflow = $("editor").classList.contains("hidden") ? "" : "hidden"; }   // keep the editor's scroll lock when returning to it
+  function closeImporter() { hideImporterDom(); releaseView("importer"); }
   $("iwClose").onclick = closeImporter;
   async function importWizard(file, prefill = {}) {
     const srcUrl = URL.createObjectURL(file); const info = await looksClean(file);
@@ -1260,6 +1338,7 @@ const ReelEngine = (() => {
     if (prefill.asin) $("gUrl").dataset.lookedAsin = prefill.asin;
     if (replacing) { $("gBrand").value = replacing.brand || ""; $("gNotes").value = replacing.notes || ""; $("gPublic").checked = !!replacing.public_ok; $("iwBody").insertAdjacentHTML("afterbegin", `<p class="hint" style="margin:0 0 8px"><strong>Replacing the photo of “${esc(replacing.name)}”.</strong> Name, link and details below stay unless you change them.</p>`); }
     $("importer").classList.remove("hidden"); $("importer").scrollTop = 0; document.body.style.overflow = "hidden";
+    pushView("importer");
 
     const wrap = $("cropWrap"), box = $("cropBox"), img = $("cropImg");
     // geometry of the displayed image inside the wrapper
@@ -1631,6 +1710,7 @@ const ReelEngine = (() => {
     $("adjTitle").textContent = title || "Adjust photo";
     $("adjMsg").textContent = ""; $("adjSave").disabled = false; $("adjBright").value = "0";
     $("adjuster").classList.remove("hidden"); document.body.style.overflow = "hidden";
+    pushView("adjuster");
     const aspects = { "4:5": [4, 5], "1:1": [1, 1], "9:16": [9, 16] };
     const oriented = () => st.rot % 180 ? [st.img.naturalHeight, st.img.naturalWidth] : [st.img.naturalWidth, st.img.naturalHeight];
     const frameBox = () => {
@@ -1694,7 +1774,7 @@ const ReelEngine = (() => {
     $("adjAspect").querySelectorAll(".chip").forEach((c) => c.onclick = () => setAspect(c.dataset.a));
     $("adjRot").onclick = () => { st.rot = (st.rot + 90) % 360; st.panX = 0; st.panY = 0; paint(); };
     $("adjBright").oninput = () => { st.bright = +$("adjBright").value; paint(); };
-    $("adjCancel").onclick = () => { $("adjuster").classList.add("hidden"); document.body.style.overflow = ""; };
+    $("adjCancel").onclick = () => { hideAdjusterDom(); releaseView("adjuster"); };
     $("adjReset").onclick = async () => {
       try {
         note("adjMsg", "Restoring original…");
@@ -1722,7 +1802,7 @@ const ReelEngine = (() => {
         ctx.drawImage(st.img, -st.img.naturalWidth / 2, -st.img.naturalHeight / 2, st.img.naturalWidth, st.img.naturalHeight);
         const out = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.92));
         if (!out) throw new Error("This phone could not save the photo.");
-        $("adjuster").classList.add("hidden"); document.body.style.overflow = "";
+        hideAdjusterDom(); releaseView("adjuster");
         await onSave(out);
       } catch (e) { note("adjMsg", e.message, true); $("adjSave").disabled = false; st.busy = false; }
     };
@@ -2342,6 +2422,7 @@ const ReelEngine = (() => {
     $("edName").value = c.name; $("edMsg").textContent = ""; if (c._draft) note("edMsg", "Not saved yet — tap Save to keep this collage.");
     stage.querySelectorAll("img.fixed").forEach((e) => e.remove());
     $("editor").classList.remove("hidden"); document.body.style.overflow = "hidden";
+    pushView("editor");
     if (ed.layout.imported && ed.layout.image) { $("editor").classList.add("imported"); $("edFixed").classList.remove("hidden"); await showImportedImage(); return; }
     $("editor").classList.remove("imported"); $("edFixed").classList.add("hidden");
     await preloadImgs(); renderStatic();
@@ -2397,9 +2478,12 @@ const ReelEngine = (() => {
     }
   }
   function closeEditor() {
+    if (historyGuard) { hideEditorDom(); return; }
     if (ed.dirty && !confirm("Leave without saving? Unsaved changes will be lost.")) return;
-    $("editor").classList.add("hidden"); $("editor").classList.remove("imported"); $("edFixed").classList.add("hidden");
-    stage.querySelectorAll("img.fixed").forEach((e) => e.remove()); document.body.style.overflow = ""; ed.c = null; loadAll();
+    ed.dirty = false;
+    hideEditorDom();
+    releaseView("editor");
+    loadAll();
   }
   $("edClose").onclick = closeEditor;
 
@@ -3612,8 +3696,9 @@ const ReelEngine = (() => {
   function openShopPreview(link) {
     const u = new URL(link); u.searchParams.set("from", "studio"); u.searchParams.set("embed", "1");
     $("spvFrame").src = u.toString(); $("spvUrl").textContent = link; $("spvOpen").href = fromStudio(link); $("shopPreview").classList.remove("hidden");
+    pushView("preview");
   }
-  $("spvClose").onclick = () => { $("shopPreview").classList.add("hidden"); $("spvFrame").src = "about:blank"; };
+  $("spvClose").onclick = () => { hidePreviewDom(); releaseView("preview"); };
   $("edShare").onclick = async () => { if (ed.c._draft || ed.dirty) { if (!confirm(ed.c._draft ? "Save the collage first? Sharing and publishing need a saved collage." : "Save the collage first?")) return; await $("edSave").onclick(); if (ed.c._draft || ed.dirty) return; } await shareSheet(); };
   async function shareSheet(opts = {}) {
     let ensureError = null;
@@ -4219,6 +4304,11 @@ const ReelEngine = (() => {
   });
   if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
     window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches, backfillShopPhotos, ensureLookItem, needsProductName, titledName, lookupProductTitle, fillGarmentName, fillMissingNames, watchProductLink, FILL_NAME_GAP_MS };
+  }
+  if (!history.state || !history.state.closetiq) {
+    const root = { closetiq: 1, kind: "tab", tab: currentTab() };
+    history.replaceState(root, "");
+    history.pushState(root, "");
   }
 })();
 </script>
