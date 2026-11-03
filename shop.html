@@ -15,7 +15,7 @@
 <meta property="og:type" content="website">
 <title>Shop This Outfit</title>
 <script>
-window.BUILD = "6";
+window.BUILD = "7";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   async function checkBuild() {
@@ -89,7 +89,7 @@ window.BUILD = "6";
 <body>
 <div class="wrap" id="page"><div class="empty">Loading…</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=6"></script>
+<script src="shop-cover.js?v=7"></script>
 <script>
 (async () => {
   // Public page: reads ONLY published snapshots via the anon key (RLS: published = true). No login, no private data.
@@ -103,7 +103,7 @@ window.BUILD = "6";
   const ok = (u) => isShopLink(u);
   const home = location.pathname.split("/").pop() || "shop.html";
   // A plain link, never history.back: standalone home-screen mode has no browser back button.
-  const studioHref = new URL("index.html?v=" + encodeURIComponent(window.BUILD || "6"), location.href).href;
+  const studioHref = new URL("index.html?v=" + encodeURIComponent(window.BUILD || "7"), location.href).href;
   const fromStudio = qs.get("from") === "studio", embed = qs.get("embed") === "1";
   let owner = false;
   try { const { data } = await sb.auth.getSession(); owner = !!data.session?.user; } catch {}
@@ -172,7 +172,7 @@ window.BUILD = "6";
   document.title = p.title + " · Shop This Outfit";
   // Short, clean product name (first clause; if still long, first three words + the final word). Display only.
   const GARMENT_NOUNS = /^(sweatshirts?|sweaters?|hoodies?|cardigans?|tops?|tees?|t-shirts?|shirts?|blouses?|tanks?|bodysuits?|jackets?|coats?|blazers?|vests?|leggings|pants|trousers|jeans|joggers|shorts|skirts?|dress(es)?|rompers?|jumpsuits?|sneakers?|boots?|heels|sandals|loafers|flats|mules|shoes?|socks?|bags?|totes?|purses?|clutch(es)?|backpacks?|belts?|scarf|scarves|hats?|caps?|beanies?|earrings?|necklaces?|bracelets?|rings?|watch(es)?|sunglasses|glasses|sets?|mini|midi|maxi)$/i;
-  const shortName = (name) => { let s = String(name || "").trim().replace(/\s+/g, " "); s = s.split(/\s*[,;|(]\s*|\s[-–—]\s|\s+(?:that|with|for|featuring|in a|in an)\s+/i)[0].trim().replace(/[.\s]+$/, ""); let w = s.split(" ").filter(Boolean); let last = -1; w.forEach((x, i) => { if (GARMENT_NOUNS.test(x.replace(/[^a-z-]/gi, ""))) last = i; }); if (last >= 0) w = w.slice(0, last + 1); if (w.join(" ").length > 40 && w.length > 4) w = [...w.slice(0, 3), w[w.length - 1]]; s = w.join(" "); return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; };
+  const shortName = (name) => { let s = String(name || "").trim().replace(/\s+/g, " "); const re = /\s*[,;|(]\s*|\s[-–—]\s|\s+(?:that|with|for|featuring|in a|in an)\s+/gi; let m; while ((m = re.exec(s))) { const left = s.slice(0, m.index).trim(); if (left.split(/\s+/).some((w) => GARMENT_NOUNS.test(w.replace(/[^a-z-]/gi, ""))) || left.length > 42) { s = left; break; } } s = s.trim().replace(/[.\s]+$/, ""); let w = s.split(" ").filter(Boolean); let last = -1; w.forEach((x, i) => { if (GARMENT_NOUNS.test(x.replace(/[^a-z-]/gi, ""))) last = i; }); if (last >= 0) w = w.slice(0, last + 1); if (w.join(" ").length > 40 && w.length > 4) w = [...w.slice(0, 3), w[w.length - 1]]; s = w.join(" "); return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; };
   // Real products only. A category placeholder with no link (a collage slot named "Tops") stays off the list.
   // A saved Amazon link still shows, even when the name is generic and even when there is no public photo.
   // custom.jpg is an owner upload, so collage hotspots are not drawn on it.

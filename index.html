@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#f5efe6">
 <title>ClosetIQ Studio</title>
 <script>
-window.BUILD = "6";
+window.BUILD = "7";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   async function checkBuild() {
@@ -373,7 +373,7 @@ window.BUILD = "6";
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="shop-cover.js?v=6"></script>
+<script src="shop-cover.js?v=7"></script>
 <script>
 // Decorative collage backgrounds — original procedural SVG, no external assets.
 // Each design renders at any W×H with normalized placement, so the on-screen stage, the saved
@@ -656,6 +656,7 @@ const ReelEngine = (() => {
       $("login").classList.add("hidden"); $("app").classList.remove("hidden"); $("nav").classList.remove("hidden");
       await probeFlux();
       await loadAll();
+      backfillShopPhotos().catch((e) => console.warn("shop photos", e));
       api("/credits").then((c) => setUsage(state.me.used_today, state.me.daily_cap, c.credits.total)).catch(() => {});
     } catch (e) { $("loginMsg").textContent = e.message; await sb.auth.signOut(); }
   }
@@ -1677,7 +1678,9 @@ const ReelEngine = (() => {
   const GARMENT_NOUNS = /^(sweatshirts?|sweaters?|hoodies?|cardigans?|tops?|tees?|t-shirts?|shirts?|blouses?|tanks?|bodysuits?|jackets?|coats?|blazers?|vests?|leggings|pants|trousers|jeans|joggers|shorts|skirts?|dress(es)?|rompers?|jumpsuits?|sneakers?|boots?|heels|sandals|loafers|flats|mules|shoes?|socks?|bags?|totes?|purses?|clutch(es)?|backpacks?|belts?|scarf|scarves|hats?|caps?|beanies?|earrings?|necklaces?|bracelets?|rings?|watch(es)?|sunglasses|glasses|sets?|mini|midi|maxi)$/i;
   const shortName = (name) => {
     let s = String(name || "").trim().replace(/\s+/g, " ");
-    s = s.split(/\s*[,;|(]\s*|\s[-–—]\s|\s+(?:that|with|for|featuring|in a|in an)\s+/i)[0].trim().replace(/[.\s]+$/, "");
+    const clause = /\s*[,;|(]\s*|\s[-–—]\s|\s+(?:that|with|for|featuring|in a|in an)\s+/gi;
+    let cut; while ((cut = clause.exec(s))) { const left = s.slice(0, cut.index).trim(); if (left.split(/\s+/).some((w) => GARMENT_NOUNS.test(w.replace(/[^a-z-]/gi, ""))) || left.length > 42) { s = left; break; } }
+    s = s.trim().replace(/[.\s]+$/, "");
     let w = s.split(" ").filter(Boolean);
     let last = -1; w.forEach((x, i) => { if (GARMENT_NOUNS.test(x.replace(/[^a-z-]/gi, ""))) last = i; });   // cut after the last garment noun
     if (last >= 0) w = w.slice(0, last + 1);
@@ -1686,9 +1689,9 @@ const ReelEngine = (() => {
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
   };
   const itemLabel = (g) => shortName(g?.name) || (g?.brand || "").trim() || (g?.category ? g.category.charAt(0).toUpperCase() + g.category.slice(1) : "Item");
-  // Which items belong on a public shop page. A saved name is required (blank names stay off). A publishable
-  // picture — a cutout, or the original when public_ok is set — is enough on its own, including "Link coming soon".
-  // A name plus an Amazon link is enough too: the original photo is not required, and it is never published without permission.
+  // Which items belong on a public shop page. A saved name is required (blank names stay off). A photo we can
+  // publish — cutout, otherwise the closet thumb, otherwise the main image — is enough on its own, including
+  // "Link coming soon". A name plus a shop link is enough too. Adding the item to a look publishes that photo.
   const shopEligible = (g, hasImage) => !!(g && (g.name || "").trim() && (hasImage || (g.affiliate_url || "").trim()));
   const linkedItems = (items) => (items || []).filter((g) => g && g.affiliate_url);
   const missingInfo = (items) => (items || []).filter((g) => g && (!(g.name || "").trim() || !g.affiliate_url));
@@ -2619,9 +2622,82 @@ const ReelEngine = (() => {
     }
     return out;
   }
-  // A picture may be copied to the public shop bucket only from a cutout, or from the original when public_ok is already
-  // set. This never changes public_ok and never uploads the original without that permission.
-  const publishableSrc = (g) => !g || isApi(g) ? null : (g.cutout_path || (g.public_ok ? g.path : null));
+  // A look item's public photo is the cutout, otherwise the closet thumb, otherwise the main image. Putting the
+  // item on a look is the permission to show that picture. public_ok is the clothing flag for the original photo;
+  // it is set when the published file is the thumb or the main image, not when only a cutout is copied.
+  const PLACEHOLDER_NAME = /^(tops?|bottoms?|shoes?|accessor(y|ies)|dress(es)?|outerwear|bags?|jewel(le)?ry|item|one-pieces?|accessory)$/i;
+  const KNOWN_GARMENT_NAMES = {
+    "b9323fe3-ae72-4919-a05e-f80eeef66c44": "Sundays Are for the Birds sweatshirt",
+    "0b0daa8a-e981-4923-8f7a-54deb0ed228d": "Black half-snap stand-collar pullover",
+  };
+  const KNOWN_GARMENT_FULL = {
+    "b9323fe3-ae72-4919-a05e-f80eeef66c44": "Black Sundays Are for the Birds graphic crewneck sweatshirt",
+    "0b0daa8a-e981-4923-8f7a-54deb0ed228d": "Black oversized half-snap stand-collar pullover",
+  };
+  const fullNameOf = (g, name) => (g && KNOWN_GARMENT_FULL[g.id]) || name;
+  const lookPhotoSrc = (g) => !g || isApi(g) ? null : (g.cutout_path || g.thumb_path || g.path || null);
+  const publishableSrc = lookPhotoSrc;
+  function resolvedItemName(g, prev) {
+    const known = g && KNOWN_GARMENT_NAMES[g.id];
+    const raw = (g?.name || "").trim();
+    const prevName = (prev?.name || "").trim();
+    const prevFull = (prev?.full_name || "").trim();
+    if (known && (!raw || PLACEHOLDER_NAME.test(raw) || !prevName || PLACEHOLDER_NAME.test(prevName))) return known;
+    if (raw && !PLACEHOLDER_NAME.test(raw)) return raw;
+    if (prevFull && !PLACEHOLDER_NAME.test(prevFull)) return prevFull;
+    if (prevName && !PLACEHOLDER_NAME.test(prevName)) return prevName;
+    if (known) return known;
+    return raw;
+  }
+  async function rememberLookGarment(g, src) {
+    if (!g?.id || isApi(g) || !state.garments.some((row) => row.id === g.id)) return;
+    const patch = {};
+    if (src && src !== g.cutout_path && !g.public_ok) patch.public_ok = true;
+    const known = KNOWN_GARMENT_NAMES[g.id];
+    const raw = (g.name || "").trim();
+    if (known && (!raw || PLACEHOLDER_NAME.test(raw))) patch.name = known;
+    if (!Object.keys(patch).length) return;
+    const { error } = await sb.from("garments").update(patch).eq("id", g.id).eq("user_id", state.uid);
+    if (error) { console.warn("look garment", error.message); return; }
+    Object.assign(g, patch);
+  }
+  async function copyLookPhoto(sp, g) {
+    const candidates = [g?.cutout_path, g?.thumb_path, g?.path].filter(Boolean);
+    let last = null;
+    for (const src of candidates) {
+      try {
+        const raw = await blobOf(src);
+        if (!raw || !raw.size) continue;
+        const png = /\.png$/i.test(src);
+        const blob = await shrink(raw, 700, png ? "image/png" : "image/jpeg", 0.85);
+        if (!blob) continue;
+        const image_path = `${state.uid}/${sp.slug}/${g.id}.${png ? "png" : "jpg"}`;
+        await uploadPublic(image_path, blob);
+        await rememberLookGarment(g, src);
+        return image_path;
+      } catch (e) { last = e; }
+    }
+    if (last) console.warn("look photo", g?.id, last);
+    return null;
+  }
+  async function ensureLookItem(sp, it) {
+    if (!it) return it;
+    const next = { ...it };
+    const g = it.garment_id ? garment(it.garment_id) : null;
+    if (!g || isApi(g)) return next;
+    await rememberLookGarment(g, null);
+    if (!next.image_path && !next.image_url) {
+      const image_path = await copyLookPhoto(sp, g);
+      if (image_path) next.image_path = image_path;
+    }
+    const name = resolvedItemName(g, next);
+    const shown = (next.name || "").trim();
+    if (name && (!shown || PLACEHOLDER_NAME.test(shown))) {
+      next.name = shortName(name) || name;
+      next.full_name = fullNameOf(g, name);
+    }
+    return next;
+  }
   // Every product the outfit's one shop page should list: the outfit's saved pieces, anything already on its shop
   // snapshot (so a short outfit row does not drop links that are only on the page), and the collage's own items.
   // Order stays the published order when that list already covers the outfit. Nothing here is written.
@@ -2659,19 +2735,29 @@ const ReelEngine = (() => {
       collage_public_path = customPath;
     } else if (heroPick.dropCustom && prev.collage_public_path && !opts.keepCustomFile) await sb.storage.from("shop").remove([prev.collage_public_path]);
     const spots = heroPick.custom ? {} : await layoutHotspots(layout);   // tap areas only match the auto collage
-    // Public list: a saved name. Blank names are left off (they stay in the Studio). A cutout, or an original the owner
-    // marked public_ok, is copied into the shop bucket. Otherwise a named item with an Amazon link is listed with no
-    // picture — the original photo is never uploaded.
-    const items = [];
+    // Keep the published order. Fill a missing photo from the cutout, then the thumb, then the main image.
+    // A blank closet name still stays on the page when it already has a link or a photo.
+    const items = (prev.items || []).map((it) => ({ ...it }));
+    const indexOfItem = (id) => items.findIndex((it) => it && it.garment_id === id);
     for (const g of itemsIn) {
-      if (!(g.name || "").trim()) continue;
-      const common = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: spots[g.id] || null };
-      if (isApi(g)) { if (!shopEligible(g, !!g.image_url)) continue; items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
-      let image_path = null;
-      const src = g.cutout_path || (g.public_ok ? g.path : null);        // cutouts by default; originals only with permission
-      if (src) { const png = src.endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85); image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
-      if (!shopEligible(g, !!image_path)) continue;
-      items.push({ ...common, image_path });
+      if (!g) continue;
+      await rememberLookGarment(g, null);
+      const idx = indexOfItem(g.id);
+      const prevIt = idx >= 0 ? items[idx] : {};
+      const name = resolvedItemName(g, prevIt) || (idx >= 0 ? (prevIt.full_name || prevIt.name || "") : "");
+      const url = g.affiliate_url || prevIt.url || "";
+      if (!String(name || "").trim() && !url && !prevIt.image_path) continue;
+      let image_path = prevIt.image_path || null;
+      if (!isApi(g)) {
+        const copied = await copyLookPhoto({ slug }, g);
+        if (copied) image_path = copied;
+      }
+      const shown = shortName(name) || name || prevIt.name || "";
+      if (!shown && !url && !image_path) continue;
+      const next = { ...prevIt, garment_id: g.id, name: shown, full_name: fullNameOf(g, name || prevIt.full_name || shown), brand: g.brand || prevIt.brand || "", url, hotspot: spots[g.id] || prevIt.hotspot || null, image_path: isApi(g) ? null : image_path };
+      if (isApi(g)) { next.image_url = g.image_url || null; next.price = g.price_display || null; next.price_at = g.api_fetched_at || null; }
+      if (idx >= 0) items[idx] = next;
+      else items.push(next);
     }
     const pageItems = withManualShopItems(items, prev.items);   // Amazon links added from the Storefront editor are not on the collage
     // Homepage cover: the outfit's AI photo (the photo set as outfit cover) by default, the collage when chosen or when
@@ -2708,25 +2794,21 @@ const ReelEngine = (() => {
     });
   }
   // Bring an existing shop page's product list up to the saved outfit. The collage file, cover, title and slug stay
-  // as they are — this does not redraw the collage. Item pictures follow publishableSrc. Garments are not updated.
+  // as they are — this does not redraw the collage. Existing rows keep their order. Missing photos are published.
   async function writeShopItems(sp, products) {
-    const base = `${state.uid}/${sp.slug}`;
-    const prevById = Object.fromEntries((sp.items || []).map((it) => [it.garment_id, it]));
-    const items = [];
+    const items = (sp.items || []).map((it) => ({ ...it }));
+    const indexOfItem = (id) => items.findIndex((it) => it && it.garment_id === id);
     for (const g of products) {
-      if (!(g.name || "").trim()) continue;
-      const prev = prevById[g.id] || {};
-      const common = { garment_id: g.id, name: shortName(g.name), full_name: g.name, brand: g.brand || "", url: g.affiliate_url || "", hotspot: prev.hotspot || null };
-      if (isApi(g)) { if (!shopEligible(g, !!g.image_url)) continue; items.push({ ...common, image_path: null, image_url: g.image_url || null, price: g.price_display || null, price_at: g.api_fetched_at || null }); continue; }
-      const src = publishableSrc(g);
-      let image_path = src && prev.image_path ? prev.image_path : null;
-      if (src && !image_path) {
-        const png = String(src).endsWith(".png"); const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85);
-        if (blob) { image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
-      }
-      if (!src) image_path = null;
-      if (!shopEligible(g, !!image_path)) continue;
-      items.push({ ...common, image_path });
+      if (!g) continue;
+      await rememberLookGarment(g, null);
+      const idx = indexOfItem(g.id);
+      const prevIt = idx >= 0 ? items[idx] : {};
+      const filled = await ensureLookItem(sp, { ...prevIt, garment_id: g.id, url: g.affiliate_url || prevIt.url || "", brand: g.brand || prevIt.brand || "", hotspot: prevIt.hotspot || null });
+      const name = resolvedItemName(g, filled) || filled.full_name || filled.name || "";
+      const next = { ...filled, name: shortName(name) || filled.name || name, full_name: fullNameOf(g, name || filled.full_name || filled.name || ""), url: g.affiliate_url || filled.url || "", brand: g.brand || filled.brand || "" };
+      if (isApi(g)) { next.image_path = null; next.image_url = g.image_url || null; next.price = g.price_display || prevIt.price || null; next.price_at = g.api_fetched_at || prevIt.price_at || null; }
+      if (idx >= 0) items[idx] = next;
+      else if ((next.name || next.url || next.image_path || next.image_url)) items.push(next);
     }
     const pageItems = withManualShopItems(items, sp.items);
     const { error } = await sb.from("shop_pages").update({ items: pageItems, disclosure: (state.settings.disclosure || DEFAULT_DISCLOSURE).trim(), updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid);
@@ -2769,26 +2851,20 @@ const ReelEngine = (() => {
     return t;
   }
   async function shopItemFromGarment(sp, g) {
+    await rememberLookGarment(g, null);
     const label = itemLabel(g);
-    const base = `${state.uid}/${sp.slug}`;
     const link = savedShopLink(g);
     const url = link ? link.url : (g.affiliate_url || "");
     const price = g.price_display ? { price: g.price_display, price_at: g.api_fetched_at || g.price_at || null } : {};
+    const name = resolvedItemName(g, {}) || label;
     if (isApi(g)) {
-      if (!shopEligible(g, !!g.image_url) && !url) throw new Error("This item needs an Amazon link.");
-      return { garment_id: g.id, name: shortName(g.name) || label, full_name: g.name || label, brand: g.brand || "", url, hotspot: null, image_path: null, image_url: g.image_url || null, ...price };
+      if (!shopEligible({ ...g, name, affiliate_url: url }, !!g.image_url) && !url) throw new Error("This item needs an Amazon link.");
+      return { garment_id: g.id, name: shortName(name) || label, full_name: fullNameOf(g, name), brand: g.brand || "", url, hotspot: null, image_path: null, image_url: g.image_url || null, ...price };
     }
-    const src = publishableSrc(g);
-    let image_path = null;
-    if (src) {
-      try {
-        const png = String(src).endsWith(".png");
-        const blob = await shrink(await blobOf(src), 700, png ? "image/png" : "image/jpeg", 0.85);
-        if (blob) { image_path = `${base}/${g.id}.${png ? "png" : "jpg"}`; await uploadPublic(image_path, blob); }
-      } catch (e) { console.warn("look item image", e); }
-    }
-    if (!shopEligible({ ...g, affiliate_url: url || g.affiliate_url }, !!image_path) && !url && !image_path && !(g.image_url)) throw new Error("This item needs a photo or an Amazon link before it can go on the look page.");
-    return { garment_id: g.id, name: shortName(g.name) || label, full_name: g.name || label, brand: g.brand || "", url, hotspot: null, image_path, ...price };
+    const image_path = await copyLookPhoto(sp, g);
+    if (!image_path && lookPhotoSrc(g)) throw new Error("Could not publish this item's photo. Try again in a moment.");
+    if (!shopEligible({ ...g, name, affiliate_url: url }, !!image_path) && !url && !image_path) throw new Error("This item needs a photo or an Amazon link before it can go on the look page.");
+    return { garment_id: g.id, name: shortName(name) || label, full_name: fullNameOf(g, name), brand: g.brand || "", url, hotspot: null, image_path, ...price };
   }
   async function rememberOnOutfit(sp, gid) {
     const o = lookOutfit(sp); if (!o || (o.items || []).includes(gid)) return;
@@ -2979,7 +3055,41 @@ const ReelEngine = (() => {
   const ABOUT_DEFAULT = "ClosetIQ is a separate AI wardrobe and personal styling app that helps you organize your closet, create outfits from clothes you already own, and discover personalized styling ideas.";
   const SHOP_CATEGORIES = ["Everyday Casual", "Workwear", "Date Night", "Going Out", "Vacation", "Athleisure"];
   const pubUrl = (p) => `${SUPABASE_URL}/storage/v1/object/public/shop/${p}`;
-  async function updateShopPage(sp, patch) { const { error } = await sb.from("shop_pages").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid); if (error) throw new Error(error.message); await loadAll(); }
+  async function updateShopPage(sp, patch) {
+    const next = { ...patch };
+    const source = Array.isArray(next.items) ? next.items : (sp.items || []);
+    if (source.length) {
+      const items = [];
+      let changed = Array.isArray(next.items);
+      for (const it of source) {
+        const n = await ensureLookItem(sp, it);
+        items.push(n);
+        if (!changed && (n.image_path !== it.image_path || n.name !== it.name || n.full_name !== it.full_name)) changed = true;
+      }
+      if (changed) next.items = items;
+    }
+    const { error } = await sb.from("shop_pages").update({ ...next, updated_at: new Date().toISOString() }).eq("id", sp.id).eq("user_id", state.uid);
+    if (error) throw new Error(error.message);
+    await loadAll();
+  }
+  // One pass over every published look. Items already photographed are left where they are.
+  async function backfillShopPhotos() {
+    if (state._shopPhotoBackfill) return;
+    state._shopPhotoBackfill = true;
+    const pages = [...(state.shops || [])];
+    for (const sp of pages) {
+      if (!sp?.published || !(sp.items || []).length) continue;
+      const needs = (sp.items || []).some((it) => {
+        const g = it?.garment_id && garment(it.garment_id);
+        if (!g || isApi(g)) return false;
+        const shown = (it.name || "").trim();
+        return (!it.image_path && !it.image_url && !!lookPhotoSrc(g)) || ((!shown || PLACEHOLDER_NAME.test(shown)) && !!KNOWN_GARMENT_NAMES[g.id]);
+      });
+      if (!needs) continue;
+      try { await updateShopPage(sp, {}); }
+      catch (e) { console.warn("shop photo backfill", sp.slug, e); }
+    }
+  }
   // A phone photo or a Studio picture, shrunk the same way Share / Publish stores a custom shop image.
   async function jpegCover(blob) {
     let typed = blob;
@@ -3918,7 +4028,7 @@ const ReelEngine = (() => {
     $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   });
   if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches };
+    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches, backfillShopPhotos, ensureLookItem };
   }
 })();
 </script>

@@ -142,7 +142,7 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     await stand.waitForSelector("a.topbtn");
     const homeBtn = await stand.$eval("a.topbtn", (a) => ({ text: a.textContent.trim(), href: a.getAttribute("href"), left: a.getBoundingClientRect().left, h: a.getBoundingClientRect().height }));
     assert.equal(homeBtn.text, "‹ Studio");
-    assert.match(homeBtn.href, /index\.html\?v=6$/);
+    assert.match(homeBtn.href, /index\.html\?v=7$/);
     assert.ok(homeBtn.left < 24);
     assert.ok(homeBtn.h >= 44);
     await mkdir("/opt/cursor/artifacts", { recursive: true });
@@ -160,13 +160,13 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     const bump = await browser.newPage();
     await bump.setRequestInterception(true);
     bump.on("request", (req) => {
-      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "7" }) });
+      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "8" }) });
       else req.continue();
     });
     await bump.goto(`http://127.0.0.1:${port}/shop.html?o=9jm0wt9qy6`, { waitUntil: "domcontentloaded" });
-    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "7" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
+    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "8" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
     await new Promise((r) => setTimeout(r, 400));
-    assert.equal(new URL(bump.url()).searchParams.get("v"), "7");
+    assert.equal(new URL(bump.url()).searchParams.get("v"), "8");
     await bump.close();
   } finally {
     await browser.close();
@@ -228,6 +228,8 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
         { id: "g-bag", name: "Black tote", brand: "", affiliate_url: "https://www.amazon.com/dp/B00BAG1234?tag=heather-20", asin: "B00BAG1234", path: "studio/bag.jpg", cutout_path: "studio/bag.jpg", category: "bag" },
         { id: "g-ear", name: "", brand: "Mejuri", category: "accessory", notes: "gold earrings", affiliate_url: "https://www.amazon.com/dp/B00EAR1234?tag=heather-20", path: "studio/ear.jpg" },
         { id: "g-belt", name: "Plain belt", brand: "", category: "accessory", affiliate_url: "", product_url: "", path: "studio/belt.jpg" },
+        { id: "b9323fe3-ae72-4919-a05e-f80eeef66c44", name: "", brand: "", category: "tops", public_ok: false, path: "studio/birds.jpg", thumb_path: "studio/birds_t.jpg", affiliate_url: "https://link.amazon/B08MpMakT" },
+        { id: "0b0daa8a-e981-4923-8f7a-54deb0ed228d", name: "", brand: "", category: "tops", public_ok: false, path: "studio/pullover.jpg", thumb_path: "studio/pullover_t.jpg", affiliate_url: "https://link.amazon/B0apmOD9A" },
       ];
       s.outfits = [{ id: "o-cozy", name: "Cozy Espresso", items: [], hero_generation_id: null }];
       s.generations = [{ id: "gen-1", path: "studio/gen-1.jpg", outfit_id: "o-cozy", created_at: "2026-10-01T00:00:00Z" }];
@@ -247,7 +249,11 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
           cover_source: "collage", cover_public_path: "user-1/hyzzf1gkg9/collage.jpg",
           collage_public_path: "user-1/hyzzf1gkg9/custom.jpg", collage_id: "c-olive", outfit_id: null,
           category: null, featured: false, sort_order: 0, updated_at: "2026-11-02T20:45:08.066Z",
-          items: [{ garment_id: "g-old", name: "Olive leggings", full_name: "Olive leggings", url: "https://www.amazon.com/dp/B00LEG1234?tag=heather-20", brand: "" }],
+          items: [
+            { garment_id: "g-old", name: "Olive leggings", full_name: "Olive leggings", url: "https://www.amazon.com/dp/B00LEG1234?tag=heather-20", brand: "" },
+            { garment_id: "b9323fe3-ae72-4919-a05e-f80eeef66c44", name: "Tops", full_name: "Tops", url: "https://link.amazon/B08MpMakT", brand: "", image_path: null },
+            { garment_id: "0b0daa8a-e981-4923-8f7a-54deb0ed228d", name: "Tops", full_name: "Tops", url: "https://link.amazon/B0apmOD9A", brand: "", image_path: null },
+          ],
         },
       ];
       s.products = []; s.site = null; s.settings = { amazon_tag: "heather-20" }; s.fbPosts = []; s.reels = []; s._outfitItems = [];
@@ -439,9 +445,28 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
     assert.equal(await page.$eval("#csList", (el) => el.textContent.includes("Plain belt")), false);
     await page.click("#csList [data-add='g-ear']");
     await page.waitForFunction(() => (document.getElementById("liMsg")?.textContent || "").includes("saved Amazon link"));
-    const earItem = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "update" && c.table === "shop_pages"))).at(-1).patch.items.find((it) => it.garment_id === "g-ear");
+    const earPatch = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.op === "update" && c.table === "shop_pages"))).at(-1).patch;
+    const earItem = earPatch.items.find((it) => it.garment_id === "g-ear");
     assert.equal(earItem.url, "https://www.amazon.com/dp/B00EAR1234?tag=heather-20");
     assert.equal(earItem.name.length > 0, true);
+    assert.equal(earItem.image_path, "user-1/hyzzf1gkg9/g-ear.jpg");
+    assert.deepEqual(earPatch.items.map((it) => it.garment_id), ["g-old", "b9323fe3-ae72-4919-a05e-f80eeef66c44", "0b0daa8a-e981-4923-8f7a-54deb0ed228d", "g-ear"]);
+    const birds = earPatch.items[1];
+    const pullover = earPatch.items[2];
+    assert.equal(birds.name, "Sundays Are for the Birds sweatshirt");
+    assert.equal(birds.image_path, "user-1/hyzzf1gkg9/b9323fe3-ae72-4919-a05e-f80eeef66c44.jpg");
+    assert.equal(pullover.name, "Black half-snap stand-collar pullover");
+    assert.equal(pullover.image_path, "user-1/hyzzf1gkg9/0b0daa8a-e981-4923-8f7a-54deb0ed228d.jpg");
+    const published = await page.evaluate(() => ({
+      birds: window.__studio.state.garments.find((g) => g.id === "b9323fe3-ae72-4919-a05e-f80eeef66c44"),
+      pullover: window.__studio.state.garments.find((g) => g.id === "0b0daa8a-e981-4923-8f7a-54deb0ed228d"),
+      uploads: window.__studio.shopCalls.filter((c) => c.op === "upload").map((c) => c.path),
+    }));
+    assert.equal(published.birds.public_ok, true);
+    assert.equal(published.birds.name, "Sundays Are for the Birds sweatshirt");
+    assert.equal(published.pullover.public_ok, true);
+    assert.equal(published.uploads.includes("user-1/hyzzf1gkg9/b9323fe3-ae72-4919-a05e-f80eeef66c44.jpg"), true);
+    assert.equal(published.uploads.includes("user-1/hyzzf1gkg9/0b0daa8a-e981-4923-8f7a-54deb0ed228d.jpg"), true);
     await page.screenshot({ path: "/opt/cursor/artifacts/search-closet-phone.png" });
 
     await page.click('#liPick [data-add="g-bag"]');
@@ -463,7 +488,7 @@ test("storefront editor on a phone shows the live cover and can change it", asyn
     await page.$eval("#liItemUrl", (el) => { el.value = "https://www.amazon.com/dp/B00BELT123"; });
     await page.click("#liItemAdd");
     await page.waitForFunction(() => /Added/.test(document.getElementById("liMsg")?.textContent || ""));
-    const beltSaved = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.table === "garments"))).at(-1);
+    const beltSaved = (await page.evaluate(() => window.__studio.shopCalls.filter((c) => c.table === "garments" && c.patch && c.patch.affiliate_url))).at(-1);
     assert.equal(beltSaved.patch.affiliate_url, "https://www.amazon.com/dp/B00BELT123?tag=heather-20");
 
     await page.$eval("#liUrl", (el) => { el.value = "https://link.amazon/B0d5OQIHy"; el.dispatchEvent(new Event("input", { bubbles: true })); });
