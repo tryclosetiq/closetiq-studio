@@ -142,7 +142,7 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     await stand.waitForSelector("a.topbtn");
     const homeBtn = await stand.$eval("a.topbtn", (a) => ({ text: a.textContent.trim(), href: a.getAttribute("href"), left: a.getBoundingClientRect().left, h: a.getBoundingClientRect().height }));
     assert.equal(homeBtn.text, "‹ Studio");
-    assert.match(homeBtn.href, /index\.html\?v=10$/);
+    assert.match(homeBtn.href, /index\.html\?v=11$/);
     assert.ok(homeBtn.left < 24);
     assert.ok(homeBtn.h >= 44);
     await mkdir("/opt/cursor/artifacts", { recursive: true });
@@ -160,13 +160,13 @@ test("home-screen storefront shows Studio and reloads when the build changes", a
     const bump = await browser.newPage();
     await bump.setRequestInterception(true);
     bump.on("request", (req) => {
-      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "11" }) });
+      if (req.url().includes("version.json")) req.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ version: "12" }) });
       else req.continue();
     });
     await bump.goto(`http://127.0.0.1:${port}/shop.html?o=9jm0wt9qy6`, { waitUntil: "domcontentloaded" });
-    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "11" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
+    await bump.waitForFunction(() => new URLSearchParams(location.search).get("v") === "12" && new URLSearchParams(location.search).get("o") === "9jm0wt9qy6");
     await new Promise((r) => setTimeout(r, 400));
-    assert.equal(new URL(bump.url()).searchParams.get("v"), "11");
+    assert.equal(new URL(bump.url()).searchParams.get("v"), "12");
     await bump.close();
   } finally {
     await browser.close();
