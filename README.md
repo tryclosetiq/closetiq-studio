@@ -6,6 +6,14 @@ project behind authentication; AI calls go through a server-side function that h
 
 Nothing personal is stored here: the page contains only the Supabase project URL and its public
 anon key, which grant no access on their own.
+
+## Sign out and password reset
+
+Sign-in stays in this browser until someone uses **Sign out**. The header **Account** button shows the signed-in email and opens the same account sheet. **Sign out** is the first action in that sheet. It calls `supabase.auth.signOut({ scope: "local" })`, which clears only this browser's session. Back, closing a sheet, and a version reload do not sign out.
+
+**Forgot password?** on the sign-in screen calls `supabase.auth.resetPasswordForEmail` and sends the link back to this page with `?v=` set to the build number (`https://tryclosetiq.github.io/closetiq-studio/index.html?v=11` for the current build). The generic success text is shown only when that call returns no error. The Supabase project’s Auth email delivery and redirect allow list are not in this repo. Until those dashboard settings include this exact return URL, the button shows the provider error instead of claiming a link was sent. The reset page then uses `supabase.auth.updateUser({ password })` after the person chooses a new password. Nothing in Studio sets a password by itself.
+
+Her current entry `https://tryclosetiq.github.io/closetiq-studio/index.html?v=10` is the same document as every other `v` value. GitHub Pages caches it for about 10 minutes (`cache-control: max-age=600`). There is no service worker. `version.json` is `11` and `window.BUILD` is `"11"`, so a cached build 10 document will `location.replace` itself to `?v=11` and will not clear the saved session. Do not publish this change until the pull request is reviewed.
 Phase 2 deployment update
 
 ## FLUX multi-item try-on

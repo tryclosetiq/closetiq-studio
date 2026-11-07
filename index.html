@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#f5efe6">
 <title>ClosetIQ Studio</title>
 <script>
-window.BUILD = "10";
+window.BUILD = "11";
 (function () {
   window.__standalone = navigator.standalone === true || !!(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   try {
@@ -59,9 +59,19 @@ window.BUILD = "10";
   *{box-sizing:border-box} html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "Inter Tight",system-ui,sans-serif;min-height:100dvh}
   header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);
-         padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:baseline;justify-content:space-between;border-bottom:1px solid var(--line)}
-  header h1{font:600 22px/1 Fraunces,serif;margin:0}
-  header .usage{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+         padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line)}
+  .brand{min-width:0;flex:1 1 auto}
+  header h1{font:600 20px/1.1 Fraunces,serif;margin:0}
+  header .usage{display:block;margin-top:3px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .account-btn{flex:0 1 auto;max-width:min(58%,280px);display:inline-flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:1px;min-height:44px;min-width:44px;padding:6px 10px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);cursor:pointer;text-align:right}
+  .account-btn[hidden]{display:none !important}
+  html.has-session #accountBtn{display:inline-flex !important}
+  .account-email{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.2;color:var(--muted);font-weight:500}
+  .account-action{font-size:14px;font-weight:600;line-height:1.2}
+  .account-sheet-email{font-weight:600;margin:0;word-break:break-all}
+  #logout,#forgotPw{min-height:44px}
+  #recovery{position:fixed;inset:0;z-index:70;background:var(--bg);overflow:auto;padding:calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom))}
+  #recovery .card{max-width:420px;margin:12px auto}
   main{padding:14px 16px calc(84px + env(safe-area-inset-bottom))}
   h2{font:600 24px/1.15 Fraunces,serif;margin:4px 0 12px;text-wrap:balance}
   h3{font:600 17px/1.2 "Inter Tight",sans-serif;margin:14px 0 8px}
@@ -188,7 +198,13 @@ window.BUILD = "10";
 </style>
 </head>
 <body>
-<header><h1 id="title">ClosetIQ Studio</h1><span class="usage" id="usage"></span></header>
+<header>
+  <div class="brand"><h1 id="title">ClosetIQ Studio</h1><span class="usage" id="usage"></span></div>
+  <button type="button" class="account-btn" id="accountBtn" hidden aria-haspopup="dialog" aria-controls="sheet" aria-label="Account">
+    <span id="accountEmail" class="account-email"></span>
+    <span class="account-action">Account</span>
+  </button>
+</header>
 
 <main id="login" class="stack" style="max-width:420px;margin:40px auto 0">
   <h2>Welcome back</h2>
@@ -197,9 +213,25 @@ window.BUILD = "10";
     <div><label for="email">Email</label><input id="email" type="email" autocomplete="username" required></div>
     <div><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required></div>
     <button class="btn" type="submit">Sign in</button>
-    <div id="loginMsg" class="msg err"></div>
+    <button class="btn secondary" type="button" id="forgotPw">Forgot password?</button>
+    <p class="hint" id="forgotHint">Enter the account email, then tap Forgot password. The link is sent only when Studio's sign-in email is turned on. If it is not, the message below says so.</p>
+    <div id="forgotMsg" class="msg" role="status"></div>
+    <div id="loginMsg" class="msg err" role="status"></div>
   </form>
 </main>
+
+<section id="recovery" class="hidden" role="dialog" aria-labelledby="recoveryTitle" aria-modal="true">
+  <div class="stack" style="max-width:420px;margin:24px auto 0">
+    <h2 id="recoveryTitle">Choose a new password</h2>
+    <p class="hint">This finishes the reset link. Your closet stays as it is.</p>
+    <form id="recoveryForm" class="card stack" autocomplete="off">
+      <div><label for="recoveryPw">New password (12+ characters)</label><input id="recoveryPw" type="password" autocomplete="new-password" minlength="12" required></div>
+      <button class="btn" type="submit" id="recoverySave">Update password</button>
+      <button class="btn secondary" type="button" id="recoverySkip">Continue without changing</button>
+      <div id="recoveryMsg" class="msg" role="status"></div>
+    </form>
+  </div>
+</section>
 
 <main id="app" class="hidden">
   <section id="tab-models">
@@ -764,24 +796,119 @@ const ReelEngine = (() => {
       note(msgId, filled ? `Filled ${filled} name${filled === 1 ? "" : "s"}.` : "No names came back. You can type them in.");
     } finally { if (btn) btn.disabled = false; }
   }
+  let sessionEmail = "";
+  function recoveryRedirect() {
+    const u = new URL(location.pathname, location.origin);
+    u.searchParams.set("v", String(window.BUILD || ""));
+    return u.toString();
+  }
+  function showAccount(email) {
+    const value = String(email || (state.me && state.me.email) || sessionEmail || "").trim();
+    const btn = $("accountBtn");
+    if (!btn) return;
+    $("accountEmail").textContent = value;
+    btn.hidden = false;
+    btn.setAttribute("aria-label", value ? `Account, signed in as ${value}` : "Account");
+    btn.title = value ? `Signed in as ${value}` : "Account";
+  }
+  function hideAccount() {
+    const btn = $("accountBtn");
+    if (!btn) return;
+    btn.hidden = true;
+    $("accountEmail").textContent = "";
+    btn.setAttribute("aria-label", "Account");
+    btn.removeAttribute("title");
+  }
+  function showRecovery() {
+    $("recovery").classList.remove("hidden");
+  }
+  function hideRecovery() {
+    $("recovery").classList.add("hidden");
+    if ($("recoveryMsg")) $("recoveryMsg").textContent = "";
+  }
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault(); $("loginMsg").textContent = "";
     const { error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
     if (error) $("loginMsg").textContent = error.message; else boot();
   });
-  sb.auth.getSession().then(({ data }) => { if (data.session) boot(); else showLogin(); });
+  $("forgotPw").addEventListener("click", async () => {
+    const email = $("email").value.trim();
+    const msg = $("forgotMsg");
+    msg.className = "msg";
+    msg.textContent = "";
+    if (!email) {
+      msg.textContent = "Enter the account email above, then tap Forgot password again.";
+      msg.className = "msg err";
+      $("email").focus();
+      return;
+    }
+    $("forgotPw").disabled = true;
+    try {
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: recoveryRedirect() });
+      if (error) {
+        msg.textContent = "Could not send a reset email. " + (error.message || "Try again later.");
+        msg.className = "msg err";
+      } else {
+        msg.textContent = "If an account exists for that email, a reset link is on its way. Check your inbox.";
+        msg.className = "msg ok";
+      }
+    } catch (e) {
+      msg.textContent = "Could not send a reset email. " + (e.message || "Try again later.");
+      msg.className = "msg err";
+    } finally {
+      $("forgotPw").disabled = false;
+    }
+  });
+  let recoveryUpdated = false;
+  $("recoverySkip").addEventListener("click", () => {
+    const updated = recoveryUpdated;
+    hideRecovery();
+    if (updated && $("app").classList.contains("hidden")) boot();
+  });
+  $("recoveryForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pw = $("recoveryPw").value;
+    if (pw.length < 12) { note("recoveryMsg", "12+ characters, please.", true); return; }
+    const btn = $("recoverySave");
+    btn.disabled = true;
+    try {
+      const { error } = await sb.auth.updateUser({ password: pw });
+      if (error) { note("recoveryMsg", error.message || "Could not update the password.", true); return; }
+      $("recoveryPw").value = "";
+      recoveryUpdated = true;
+      note("recoveryMsg", "Password updated.", false);
+      $("recoverySkip").textContent = "Continue";
+    } catch (err) {
+      note("recoveryMsg", err.message || "Could not update the password.", true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  sb.auth.onAuthStateChange((event) => { if (event === "PASSWORD_RECOVERY") showRecovery(); });
+  sb.auth.getSession().then(({ data }) => {
+    sessionEmail = (data.session && data.session.user && data.session.user.email) || "";
+    if (data.session) { showAccount(sessionEmail); boot(); }
+    else showLogin();
+  });
 
-  function showLogin(message) {
+  function showLogin(message, ok) {
     document.documentElement.classList.remove("has-session");
+    hideAccount();
+    hideRecovery();
     $("login").classList.remove("hidden");
     $("app").classList.add("hidden");
     $("nav").classList.add("hidden");
-    if (message) $("loginMsg").textContent = message;
+    if ($("usage")) $("usage").textContent = "";
+    if (message) {
+      $("loginMsg").textContent = message;
+      $("loginMsg").className = "msg " + (ok ? "ok" : "err");
+    }
   }
   function showApp() {
     $("login").classList.add("hidden");
     $("app").classList.remove("hidden");
     $("nav").classList.remove("hidden");
+    showAccount((state.me && state.me.email) || sessionEmail);
   }
   async function boot() {
     try {
@@ -797,7 +924,7 @@ const ReelEngine = (() => {
       api("/credits").then((c) => setUsage(state.me.used_today, state.me.daily_cap, c.credits.total)).catch(() => {});
     } catch (e) {
       const msg = e && e.message ? e.message : "";
-      if (/401|jwt|unauthorized|signed out|sign in required/i.test(msg)) { await sb.auth.signOut(); showLogin(msg); }
+      if (/401|jwt|unauthorized|signed out|sign in required/i.test(msg)) { try { await sb.auth.signOut({ scope: "local" }); } catch (err) {} showLogin(msg); }
       else showApp();
     }
   }
@@ -4267,23 +4394,55 @@ const ReelEngine = (() => {
     };
   }
 
-  // ------------------------------------------------------------------ account (header tap)
-  $("title").addEventListener("click", () => {
-    if (!state.me) return; const s = state.settings;
-    openSheet(`<h3>Account</h3><div class="stack"><p class="kv">${esc(state.me.email)} · limit ${state.me.daily_cap} credits/day (${esc(state.me.tz || "")})</p>
+  // ------------------------------------------------------------------ account (header Account button; the title still opens it)
+  async function signOutHere() {
+    const btn = $("logout");
+    if (btn) btn.disabled = true;
+    note("logoutMsg", "Signing out…");
+    let error = null;
+    try {
+      const result = await sb.auth.signOut({ scope: "local" });
+      error = result && result.error;
+    } catch (e) {
+      error = e instanceof Error ? e : new Error("Could not sign out.");
+    }
+    if (error) {
+      if (btn) btn.disabled = false;
+      const detail = String(error.message || "Could not sign out.").trim();
+      const sentence = /[.!?]$/.test(detail) ? detail : detail + ".";
+      note("logoutMsg", sentence + " You are still signed in.", true);
+      return;
+    }
+    state.me = null;
+    state.uid = null;
+    sessionEmail = "";
+    closeSheet();
+    showLogin("Signed out on this browser. Other devices stay signed in.", true);
+  }
+  function openAccount() {
+    const signedIn = !!(state.me || sessionEmail || document.documentElement.classList.contains("has-session"));
+    if (!signedIn) return;
+    const s = state.settings || {};
+    const email = String((state.me && state.me.email) || sessionEmail || "").trim();
+    const cap = state.me && state.me.daily_cap != null ? `Limit ${state.me.daily_cap} credits/day (${esc(state.me.tz || "")})` : "";
+    openSheet(`<h3>Account</h3><div class="stack">
+      <p id="accountSheetEmail" class="account-sheet-email">${email ? esc(email) : "Signed in"}</p>
+      ${cap ? `<p class="kv">${cap}</p>` : ""}
+      <button class="btn secondary" type="button" id="logout">Sign out</button>
+      <div id="logoutMsg" class="msg" role="status"></div>
       <h3>Amazon & captions</h3>
       <div><label>Amazon Associates tracking ID</label><input type="text" id="setTag" value="${esc(s.amazon_tag)}" placeholder="yourname-20" autocapitalize="none"></div>
       <div><label>Affiliate disclosure</label><textarea id="setDisc">${esc(s.disclosure || DEFAULT_DISCLOSURE)}</textarea></div>
       <div><label>Default hashtags</label><input type="text" id="setTags" value="${esc(s.hashtags)}" placeholder="#ootd #amazonfinds #amazonfashion"></div>
       <div><label>Social handle (optional)</label><input type="text" id="setHandle" value="${esc(s.handle)}" placeholder="@yourhandle" autocapitalize="none"></div>
       <div><label>Amazon Storefront link (shown on your shopping homepage)</label><input type="url" id="setStore" value="${esc(s.amazon_storefront_url || "")}" placeholder="https://www.amazon.com/shop/yourname" inputmode="url" autocapitalize="none"></div>
-      <button class="btn" id="setSave">Save settings</button>
-      <button class="btn secondary" id="setRetag">Re-tag all saved Amazon links with this ID</button>
-      <button class="btn secondary" id="fillNamesAcct">Fill missing names</button>
+      <button class="btn" type="button" id="setSave">Save settings</button>
+      <button class="btn secondary" type="button" id="setRetag">Re-tag all saved Amazon links with this ID</button>
+      <button class="btn secondary" type="button" id="fillNamesAcct">Fill missing names</button>
       <h3>Password</h3>
       <div><label>New password (12+ characters)</label><input id="newpw" type="password" autocomplete="new-password" minlength="12"></div>
-      <button class="btn secondary" id="changepw">Change password</button>
-      <button class="btn secondary" id="logout">Sign out</button><div id="acctMsg" class="msg"></div></div>`);
+      <button class="btn secondary" type="button" id="changepw">Change password</button>
+      <div id="acctMsg" class="msg" role="status"></div></div>`);
     $("setSave").onclick = async () => {
       const store = $("setStore").value.trim();
       if (store && !/^https:\/\/([a-z0-9-]+\.)*amazon\.[a-z.]+\//i.test(store)) { note("acctMsg", "The storefront link should be an https://www.amazon.com/… address.", true); return; }
@@ -4300,10 +4459,12 @@ const ReelEngine = (() => {
     };
     $("fillNamesAcct").onclick = () => fillMissingNames("acctMsg", $("fillNamesAcct"));
     $("changepw").onclick = async () => { const pw = $("newpw").value; if (pw.length < 12) { note("acctMsg", "12+ characters, please.", true); return; } const { error } = await sb.auth.updateUser({ password: pw }); note("acctMsg", error ? error.message : "Password changed.", !!error); };
-    $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
-  });
+    $("logout").onclick = () => signOutHere();
+  }
+  $("title").addEventListener("click", () => openAccount());
+  $("accountBtn").addEventListener("click", () => openAccount());
   if (typeof location !== "undefined" && (location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches, backfillShopPhotos, ensureLookItem, needsProductName, titledName, lookupProductTitle, fillGarmentName, fillMissingNames, watchProductLink, FILL_NAME_GAP_MS };
+    window.__studio = { state, sb, renderPickers, outfitTrySheet, showTab, setGarmentSelection, toggleGarment, selectedGarmentList, shopHomeSheet, shopTilePath, coverChoice, withManualShopItems, closetChoices, closetMatches, backfillShopPhotos, ensureLookItem, needsProductName, titledName, lookupProductTitle, fillGarmentName, fillMissingNames, watchProductLink, FILL_NAME_GAP_MS, openAccount, showApp, showLogin, showRecovery, recoveryRedirect };
   }
   if (!history.state || !history.state.closetiq) {
     const root = { closetiq: 1, kind: "tab", tab: currentTab() };
